@@ -34,6 +34,10 @@ spec:
               value: "production"
             - name: PYTHONUNBUFFERED
               value: "1"
+            - name: S3_RESULTS_BUCKET
+              value: "cloudsieve-pro-results-345794120758"
+            - name: AWS_REGION
+              value: "ap-southeast-2"
           resources:
             requests:
               cpu: "250m"
@@ -58,14 +62,15 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 2
           volumeMounts:
-            - name: cloudsieve-storage
+            - name: uploads-storage
               mountPath: /app/uploads
-              subPath: uploads
-            - name: cloudsieve-storage
+            - name: outputs-storage
               mountPath: /app/outputs
-              subPath: outputs
       volumes:
-        - name: cloudsieve-storage
-          persistentVolumeClaim:
-            claimName: cloudsieve-data-pvc
+        - name: uploads-storage
+          emptyDir:
+            sizeLimit: 5Gi
+        - name: outputs-storage
+          emptyDir:
+            sizeLimit: 5Gi
 

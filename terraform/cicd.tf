@@ -132,3 +132,34 @@ output "github_actions_role_arn" {
   description = "AWS IAM Role ARN assumed by GitHub Actions for zero-credential CI/CD"
   value       = var.enable_cicd ? aws_iam_role.github_actions[0].arn : "CI/CD role not enabled"
 }
+
+# ── 3. Patch aws-auth ConfigMap to grant GitHub Actions EKS access ──
+# EKS cluster uses CONFIG_MAP auth mode (not API mode), so we patch
+# aws-auth via a null_resource + local-exec using the EC2's kubeconfig.
+# The patch is idempotent — eksctl will not duplicate entries.
+resource "null_resource" "patch_aws_auth_github_actions" {
+  count = (var.enable_cicd && var.enable_eks) ? 1 : 0
+
+  triggers = {
+    role_arn    = aws_iam_role.github_actions[0].arn
+    cluster_arn = aws_eks_cluster.main[0].arn
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws eks update-kubeconfig --region ${var.aws_region} --name ${var.eks_cluster_name}
+      kubectl patch configmap aws-auth -n kube-system --type merge -p '{
+        "data": {
+          "mapRoles": "- rolearn: arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-eks-node-role\n  groups:\n  - system:bootstrappers\n  - system:nodes\n  username: system:node:{{EC2PrivateDNSName}}\n- rolearn: ${aws_iam_role.github_actions[0].arn}\n  groups:\n  - system:masters\n  username: github-actions\n"
+        }
+      }'
+      echo "aws-auth patched: GitHub Actions role has cluster-admin access"
+    EOT
+  }
+
+  depends_on = [
+    aws_iam_role.github_actions,
+    aws_eks_node_group.main,
+  ]
+}
+

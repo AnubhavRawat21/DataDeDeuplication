@@ -72,3 +72,4 @@ output "s3_results_bucket" {
   description = "Amazon S3 bucket name for pipeline result CSVs and artifacts"
   value       = aws_s3_bucket.results.id
 }
+

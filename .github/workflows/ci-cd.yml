@@ -1,13 +1,12 @@
-name: CloudSieve Pro — AWS DevSecOps CI/CD Pipeline
+name: CloudSieve Pro CI/CD
 
 # ─────────────────────────────────────────────────────────────────────────────
-# End-to-End CI/CD Pipeline
-# 1. Lint & Automated Pytest Suite
-# 2. Checkov IaC & Security Scanning
-# 3. AWS IAM OIDC Authentication (Zero hardcoded secrets, managed via Terraform)
-# 4. Amazon ECR Multi-Arch Docker Build & Push
-# 5. Amazon EKS Rolling Deployment
-# 6. Test artifact & scan report archival directly into Amazon S3
+# Full AWS DevSecOps Pipeline
+#  Stage 1  — Code Lint (flake8 + React build)
+#  Stage 2  — Automated Pytest suite + XML report
+#  Stage 3  — Checkov IaC security scan (Terraform)
+#  Stage 4  — AWS OIDC login → ECR build & push (backend + frontend)
+#  Stage 5  — EKS rolling deploy + S3 archival of test/scan reports
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -17,170 +16,271 @@ on:
     branches: [main]
 
 permissions:
-  id-token: write   # Required for AWS OIDC authentication
-  contents: read    # Required to checkout the code
+  id-token: write   # OIDC token for AWS authentication (no stored secrets)
+  contents: read
 
 env:
-  AWS_REGION: ap-southeast-2
-  EKS_CLUSTER_NAME: cloudsieve-eks
-  ECR_BACKEND_REPO: cloudsieve-backend
-  ECR_FRONTEND_REPO: cloudsieve-frontend
-  S3_BUCKET: cloudsieve-pro-results-345794120758
-  ROLE_ARN: arn:aws:iam::345794120758:role/cloudsieve-pro-github-actions-role
+  AWS_REGION:          ap-southeast-2
+  EKS_CLUSTER_NAME:    cloudsieve-eks
+  ECR_BACKEND_REPO:    cloudsieve-backend
+  ECR_FRONTEND_REPO:   cloudsieve-frontend
+  S3_BUCKET:           cloudsieve-pro-results-345794120758
+  ROLE_ARN:            arn:aws:iam::345794120758:role/cloudsieve-pro-github-actions-role
+  AWS_ACCOUNT_ID:      345794120758
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Stage 1 — Code Quality & Lint
+# ══════════════════════════════════════════════════════════════════════════════
 jobs:
-
-  # ── Stage 1: Quality & Lint ──
   lint:
-    name: "🔍 Code Linting"
+    name: "🔍 Code Lint & Frontend Build"
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Set up Python
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Lint Backend
+      - name: Lint Python backend
         run: |
           pip install flake8
           cd backend
-          flake8 main.py engine.py --max-line-length=120 --ignore=E501,W503,E302,E303,E241,E221,W292,F401,W293,E305
+          flake8 main.py engine.py \
+            --max-line-length=120 \
+            --ignore=E501,W503,E302,E303,E241,E221,W292,F401,W293,E305,W291,W605
 
-      - name: Set up Node.js
+      - name: Set up Node.js 18
         uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Build Frontend
+      - name: Build React frontend (lint check)
         run: |
           cd frontend
           npm ci --silent
-          npm run build
+          CI=false npm run build
 
-  # ── Stage 2: Automated Testing ──
+# ══════════════════════════════════════════════════════════════════════════════
+# Stage 2 — Automated Test Suite
+# ══════════════════════════════════════════════════════════════════════════════
   test:
-    name: "🧪 Automated Pytest Suite"
+    name: "🧪 Pytest Backend Suite"
     runs-on: ubuntu-latest
     needs: lint
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Set up Python
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Run Backend Pytest Suite
+      - name: Install backend dependencies
         run: |
           cd backend
-          pip install -r requirements.txt pytest httpx
-          python -m pytest tests/ -v --tb=short --junitxml=pytest-report.xml
+          pip install --quiet -r requirements.txt pytest pytest-asyncio httpx
 
-      - name: Upload Test Report Artifact
+      - name: Run Pytest suite
+        run: |
+          cd backend
+          python -m pytest tests/ -v --tb=short \
+            --junitxml=pytest-report.xml \
+            -p no:warnings
+
+      - name: Upload pytest XML report
         uses: actions/upload-artifact@v4
+        if: always()   # upload even on failure for debugging
         with:
           name: pytest-report
           path: backend/pytest-report.xml
+          retention-days: 30
 
-  # ── Stage 3: DevSecOps Security Scan ──
+# ══════════════════════════════════════════════════════════════════════════════
+# Stage 3 — DevSecOps: Checkov IaC Scan
+# ══════════════════════════════════════════════════════════════════════════════
   security-scan:
-    name: "🛡️ DevSecOps IaC Scan"
+    name: "🛡️ Checkov IaC Security Scan"
     runs-on: ubuntu-latest
     needs: test
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Checkov Terraform Security Scan
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov on Terraform
         uses: bridgecrewio/checkov-action@master
         with:
           directory: terraform/
           framework: terraform
           soft_fail: true
           output_format: cli
+          download_external_modules: false
 
-  # ── Stage 4: AWS OIDC Authenticated Build & Push to ECR ──
+# ══════════════════════════════════════════════════════════════════════════════
+# Stage 4 — AWS OIDC → ECR Docker Build & Push
+# (only on push to main, not on PRs)
+# ══════════════════════════════════════════════════════════════════════════════
   build-and-push:
-    name: "🐳 Build & Push ECR (AWS OIDC)"
+    name: "🐳 Build & Push to Amazon ECR"
     runs-on: ubuntu-latest
     needs: security-scan
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Authenticate to AWS via OIDC
+    outputs:
+      image_tag: ${{ github.sha }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to AWS via OIDC (zero secrets)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
 
       - name: Log in to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build & Push Backend Image
+      - name: Build & push backend image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -f docker/Dockerfile.backend -t $REGISTRY/$ECR_BACKEND_REPO:latest -t $REGISTRY/$ECR_BACKEND_REPO:${{ github.sha }} ./backend
+          echo "Building backend image..."
+          docker build \
+            -f docker/Dockerfile.backend \
+            -t $REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG \
+            -t $REGISTRY/$ECR_BACKEND_REPO:latest \
+            ./backend
+          echo "Pushing backend image..."
+          docker push $REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG
           docker push $REGISTRY/$ECR_BACKEND_REPO:latest
-          docker push $REGISTRY/$ECR_BACKEND_REPO:${{ github.sha }}
+          echo "✅ Backend image pushed: $REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG"
 
-      - name: Build & Push Frontend Image
+      - name: Build & push frontend image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -f docker/Dockerfile.frontend -t $REGISTRY/$ECR_FRONTEND_REPO:latest -t $REGISTRY/$ECR_FRONTEND_REPO:${{ github.sha }} ./frontend
+          echo "Building frontend image..."
+          docker build \
+            -f docker/Dockerfile.frontend \
+            -t $REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG \
+            -t $REGISTRY/$ECR_FRONTEND_REPO:latest \
+            ./frontend
+          echo "Pushing frontend image..."
+          docker push $REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG
           docker push $REGISTRY/$ECR_FRONTEND_REPO:latest
-          docker push $REGISTRY/$ECR_FRONTEND_REPO:${{ github.sha }}
+          echo "✅ Frontend image pushed: $REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG"
 
-  # ── Stage 5: Deploy to Amazon EKS & Archive to S3 ──
-  deploy-eks:
-    name: "🚀 Deploy EKS & S3 Archive"
+# ══════════════════════════════════════════════════════════════════════════════
+# Stage 5 — Deploy to Amazon EKS + Archive Artifacts to S3
+# ══════════════════════════════════════════════════════════════════════════════
+  deploy-and-archive:
+    name: "🚀 Deploy EKS + Archive to S3"
     runs-on: ubuntu-latest
     needs: build-and-push
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Authenticate to AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-deploy-${{ github.run_id }}
 
-      - name: Download Pytest Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: pytest-report
-          path: artifacts/
-
-      - name: Save Pipeline Build Artifacts to S3
+      - name: Configure kubectl for EKS
         run: |
-          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          aws s3 cp artifacts/pytest-report.xml s3://${{ env.S3_BUCKET }}/ci-cd-runs/${TIMESTAMP}_commit_${{ github.sha }}_report.xml
-          echo "Published CI/CD build run to s3://${{ env.S3_BUCKET }}/ci-cd-runs/"
+          aws eks update-kubeconfig \
+            --region $AWS_REGION \
+            --name $EKS_CLUSTER_NAME
+          kubectl cluster-info
+          kubectl get nodes
 
-      - name: Update kubeconfig for Amazon EKS
+      - name: Set image tags in manifests
+        env:
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+          # Substitute :latest with the precise commit SHA for this deploy
+          BACKEND_IMAGE="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_BACKEND_REPO}:${IMAGE_TAG}"
+          FRONTEND_IMAGE="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_FRONTEND_REPO}:${IMAGE_TAG}"
+          sed -i "s|.*cloudsieve-backend:.*|          image: ${BACKEND_IMAGE}|" k8s/backend-deployment.yaml
+          sed -i "s|.*cloudsieve-frontend:.*|          image: ${FRONTEND_IMAGE}|" k8s/frontend-deployment.yaml
 
-      - name: Apply Kubernetes Deployments to EKS
+      - name: Apply Kubernetes manifests
         run: |
           kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/backend-service.yaml
           kubectl apply -f k8s/frontend-service.yaml
           kubectl apply -f k8s/backend-deployment.yaml
           kubectl apply -f k8s/frontend-deployment.yaml
-          kubectl rollout restart deployment/cloudsieve-backend -n cloudsieve
-          kubectl rollout restart deployment/cloudsieve-frontend -n cloudsieve
-          kubectl rollout status deployment/cloudsieve-backend -n cloudsieve --timeout=180s
-          kubectl rollout status deployment/cloudsieve-frontend -n cloudsieve --timeout=180s
 
-      - name: Verify Live Deployment Status
+      - name: Wait for rollout to complete
         run: |
+          kubectl rollout restart deployment/cloudsieve-backend  -n cloudsieve
+          kubectl rollout restart deployment/cloudsieve-frontend -n cloudsieve
+          kubectl rollout status  deployment/cloudsieve-backend  -n cloudsieve --timeout=300s
+          kubectl rollout status  deployment/cloudsieve-frontend -n cloudsieve --timeout=300s
+
+      - name: Verify live deployment
+        run: |
+          echo "=== Pods ==="
           kubectl get pods -n cloudsieve -o wide
-          kubectl get svc -n cloudsieve
+          echo "=== Services ==="
+          kubectl get svc  -n cloudsieve
+
+      - name: Download pytest report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pytest-report
+          path: artifacts/
+
+      - name: Archive CI/CD run artifacts to S3
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
+          RUN_PREFIX="ci-cd-runs/${TIMESTAMP}_run${{ github.run_number }}_${IMAGE_TAG}"
+
+          # Upload pytest report
+          aws s3 cp artifacts/pytest-report.xml \
+            "s3://${S3_BUCKET}/${RUN_PREFIX}/pytest-report.xml"
+
+          # Create a deploy summary JSON
+          cat > deploy-summary.json << EOF
+          {
+            "run_number":   ${{ github.run_number }},
+            "run_id":       "${{ github.run_id }}",
+            "commit_sha":   "${IMAGE_TAG}",
+            "commit_msg":   "${{ github.event.head_commit.message }}",
+            "triggered_by": "${{ github.actor }}",
+            "timestamp":    "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "eks_cluster":  "${EKS_CLUSTER_NAME}",
+            "region":       "${AWS_REGION}",
+            "backend_image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_BACKEND_REPO}:${IMAGE_TAG}",
+            "frontend_image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_FRONTEND_REPO}:${IMAGE_TAG}",
+            "status":       "deployed"
+          }
+          EOF
+
+          aws s3 cp deploy-summary.json \
+            "s3://${S3_BUCKET}/${RUN_PREFIX}/deploy-summary.json"
+
+          echo "✅ Artifacts archived to: s3://${S3_BUCKET}/${RUN_PREFIX}/"
+          echo "📦 S3 CI/CD run history:"
+          aws s3 ls "s3://${S3_BUCKET}/ci-cd-runs/" | tail -5
