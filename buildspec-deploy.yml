@@ -52,3 +52,4 @@ phases:
 
       - echo "=== ALB DNS Name ==="
       - kubectl get ingress cloudsieve-ingress -n cloudsieve -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+

@@ -98,3 +98,4 @@ output "ecr_frontend_url" {
   description = "URL of the cloudsieve-frontend ECR repository"
   value       = var.enable_ecr ? aws_ecr_repository.frontend[0].repository_url : "ECR not enabled"
 }
+

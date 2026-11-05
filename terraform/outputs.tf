@@ -30,3 +30,18 @@ output "ssh_command" {
   description = "SSH connection command (using auto-generated key if applicable)"
   value       = var.existing_key_name == "" ? "ssh -i ${path.module}/cloudsieve-key.pem ubuntu@${aws_eip.server_eip.public_ip}" : "ssh -i <your-key-file>.pem ubuntu@${aws_eip.server_eip.public_ip}"
 }
+
+output "eks_frontend_url" {
+  description = "CloudSieve Frontend running on Amazon EKS"
+  value       = "http://${aws_eip.server_eip.public_ip}:8080"
+}
+
+output "eks_backend_docs_url" {
+  description = "FastAPI Backend Swagger Docs on Amazon EKS"
+  value       = "http://${aws_eip.server_eip.public_ip}:8081/docs"
+}
+
+output "eks_backend_health_url" {
+  description = "FastAPI Backend Health endpoint on Amazon EKS"
+  value       = "http://${aws_eip.server_eip.public_ip}:8081/health"
+}

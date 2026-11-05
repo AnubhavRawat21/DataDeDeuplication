@@ -68,3 +68,4 @@ spec:
         - name: cloudsieve-storage
           persistentVolumeClaim:
             claimName: cloudsieve-data-pvc
+

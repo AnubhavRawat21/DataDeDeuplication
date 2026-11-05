@@ -46,3 +46,4 @@ alertmanager:
       requests:
         cpu: 100m
         memory: 128Mi
+
