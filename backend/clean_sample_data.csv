@@ -1,0 +1,11 @@
+id,name,email,age,city,salary,anomaly_flag
+1,Alice Johnson,alice@email.com,25,New York,50000,✅ Normal
+2,Bob Smith,bob@email.com,30,London,60000,✅ Normal
+3,Charlie Brown,charlie@email.com,22,Paris,45000,✅ Normal
+5,Diana Prince,diana@email.com,29,Tokyo,70000,✅ Normal
+6,Eve Adams,,28,Berlin,55000,✅ Normal
+7,Frank Castle,frank@email.com,35,Sydney,80000,✅ Normal
+9,Grace Hopper,grace@email.com,29,Toronto,90000,✅ Normal
+10,Unknown,harry@email.com,27,Mumbai,65000,✅ Normal
+11,Henry Ford,,31,Lagos,72000,✅ Normal
+14,Jack Sparrow,jack@email.com,40,Caribbean,95000,⚠️ Anomaly

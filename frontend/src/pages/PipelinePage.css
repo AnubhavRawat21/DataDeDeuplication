@@ -1,0 +1,170 @@
+/* PipelinePage.css — CloudSieve Pro */
+
+.pipeline-page { max-width: 1100px; }
+
+.pipeline-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 20px;
+  align-items: start;
+}
+
+/* ── Settings Column ── */
+.pipeline-settings { display: flex; flex-direction: column; gap: 16px; }
+
+.info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.info-item { display: flex; flex-direction: column; gap: 2px; }
+.info-label { font-size: 11px; color: var(--text-m); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.5px; }
+.info-value { font-size: 14px; font-weight: 600; color: var(--text); }
+
+.col-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.col-tag {
+  padding: 3px 10px;
+  background: var(--bg-t);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-s);
+}
+
+.setting { }
+.setting-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.threshold-val {
+  font-family: var(--mono);
+  color: var(--accent);
+  font-size: 13px;
+}
+.setting-select {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-t);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: var(--transition);
+}
+.setting-select:focus { border-color: var(--accent); }
+
+.setting-range {
+  width: 100%;
+  -webkit-appearance: none;
+  height: 4px;
+  background: var(--bg-t);
+  border-radius: 2px;
+  outline: none;
+}
+.setting-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 8px rgba(124,58,237,0.3);
+}
+
+.setting-hint {
+  font-size: 12px;
+  color: var(--text-m);
+  margin-top: 6px;
+}
+
+.run-btn {
+  width: 100%;
+  padding: 14px 20px;
+  font-size: 14px;
+}
+
+.success-msg {
+  padding: 12px 16px;
+  background: rgba(16,185,129,0.08);
+  border: 1px solid rgba(16,185,129,0.2);
+  border-radius: var(--radius-sm);
+  color: var(--emerald);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ── Stage Tracker ── */
+.pipeline-tracker {
+  position: sticky;
+  top: 80px;
+  background: var(--bg-s);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+
+.elapsed-timer {
+  font-size: 12px;
+  color: var(--accent);
+  margin-bottom: 16px;
+  animation: pulse 1.5s ease infinite;
+}
+
+.stages { display: flex; flex-direction: column; }
+
+.stage {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  position: relative;
+}
+
+.stage-connector {
+  position: absolute;
+  left: 15px;
+  top: -6px;
+  width: 2px;
+  height: 16px;
+  background: var(--border);
+}
+.stage.done .stage-connector,
+.stage.active .stage-connector { background: var(--accent); opacity: 0.4; }
+
+.stage-node {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: var(--transition);
+  background: var(--bg);
+}
+
+.stage-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-m);
+}
+
+.stage-info { flex: 1; display: flex; justify-content: space-between; align-items: center; }
+.stage-label { font-size: 13px; font-weight: 500; color: var(--text-s); }
+.stage.done .stage-label { color: var(--text); }
+.stage.active .stage-label { color: var(--text); }
+.stage-status { flex-shrink: 0; }
+
+@media (max-width: 768px) {
+  .pipeline-layout { grid-template-columns: 1fr; }
+  .pipeline-tracker { position: static; }
+}

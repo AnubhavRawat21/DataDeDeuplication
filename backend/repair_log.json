@@ -1,0 +1,22 @@
+[
+  {
+    "column": "age",
+    "type": "invalid_age_fixed",
+    "count": 2
+  },
+  {
+    "column": "name",
+    "type": "null_filled_text",
+    "count": 1
+  },
+  {
+    "column": "email",
+    "type": "null_filled_text",
+    "count": 1
+  },
+  {
+    "column": "email",
+    "type": "invalid_email_flagged",
+    "count": 2
+  }
+]

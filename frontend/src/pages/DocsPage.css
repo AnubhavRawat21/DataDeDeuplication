@@ -1,0 +1,104 @@
+/* DocsPage.css — CloudSieve Pro */
+
+.docs-page { max-width: 900px; }
+
+/* ── Meta Bar ── */
+.docs-meta {
+  display: flex;
+  gap: 24px;
+  padding: 16px 20px;
+  background: var(--bg-s);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 20px;
+}
+.meta-item { display: flex; align-items: center; gap: 8px; }
+.meta-key { font-size: 12px; color: var(--text-m); }
+.meta-val { font-size: 13px; color: var(--text); }
+.meta-link { font-size: 13px; color: var(--accent); transition: var(--transition); }
+.meta-link:hover { color: var(--accent-b); }
+
+/* ── Endpoint List ── */
+.endpoint-list { display: flex; flex-direction: column; gap: 6px; }
+
+.endpoint-card {
+  background: var(--bg-s);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: var(--transition);
+}
+.endpoint-card:hover { border-color: var(--border-h); }
+.endpoint-card.expanded { border-color: rgba(124,58,237,0.2); }
+
+.ep-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.ep-header:hover { background: rgba(255,255,255,0.02); }
+
+.ep-path { font-size: 13px; color: var(--text); font-weight: 500; }
+.ep-desc { flex: 1; font-size: 12px; color: var(--text-m); }
+.ep-chevron { color: var(--text-m); font-size: 16px; font-weight: 300; width: 20px; text-align: center; }
+
+.ep-body {
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  background: rgba(255,255,255,0.01);
+  animation: fadeUp 0.2s ease;
+}
+
+.ep-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+.ep-detail-key { font-size: 12px; color: var(--text-m); width: 80px; flex-shrink: 0; }
+.ep-detail-val { font-size: 12px; color: var(--text-s); }
+code.ep-detail-val {
+  background: var(--bg-t);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* ── Try It ── */
+.try-result {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.try-status {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.try-status.ok { background: rgba(16,185,129,0.08); color: var(--emerald); }
+.try-status.err { background: rgba(239,68,68,0.08); color: var(--red); }
+
+.try-body {
+  padding: 12px;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-s);
+  line-height: 1.5;
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+@media (max-width: 768px) {
+  .docs-meta { flex-direction: column; gap: 8px; }
+  .ep-desc { display: none; }
+}

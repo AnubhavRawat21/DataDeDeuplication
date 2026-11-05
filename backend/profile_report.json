@@ -1,0 +1,50 @@
+{
+  "total_records": 15,
+  "total_columns": 6,
+  "total_nulls": 2,
+  "null_rate": 2.22,
+  "columns": [
+    {
+      "column": "id",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_rate": 0.0,
+      "unique_count": 15
+    },
+    {
+      "column": "name",
+      "dtype": "object",
+      "null_count": 1,
+      "null_rate": 6.67,
+      "unique_count": 13
+    },
+    {
+      "column": "email",
+      "dtype": "object",
+      "null_count": 1,
+      "null_rate": 6.67,
+      "unique_count": 11
+    },
+    {
+      "column": "age",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_rate": 0.0,
+      "unique_count": 11
+    },
+    {
+      "column": "city",
+      "dtype": "object",
+      "null_count": 0,
+      "null_rate": 0.0,
+      "unique_count": 11
+    },
+    {
+      "column": "salary",
+      "dtype": "int64",
+      "null_count": 0,
+      "null_rate": 0.0,
+      "unique_count": 11
+    }
+  ]
+}

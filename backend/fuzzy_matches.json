@@ -1,0 +1,27 @@
+[
+  {
+    "original": "Charlie Brown",
+    "duplicate": "Charlie Brownn",
+    "similarity": 96.2962962962963
+  },
+  {
+    "original": "Frank Castle",
+    "duplicate": "Frank Castlle",
+    "similarity": 96.0
+  },
+  {
+    "original": "Henry Ford",
+    "duplicate": "Henry Forde",
+    "similarity": 95.23809523809523
+  },
+  {
+    "original": "Isla Fisher",
+    "duplicate": "Isla Fisher",
+    "similarity": 100.0
+  },
+  {
+    "original": "Isla Fisher",
+    "duplicate": "Isla Fisher",
+    "similarity": 100.0
+  }
+]
