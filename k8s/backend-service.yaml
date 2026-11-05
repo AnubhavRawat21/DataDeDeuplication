@@ -11,7 +11,7 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    app: cloudsieve-backend
+    app.kubernetes.io/name: cloudsieve-backend
   ports:
     - name: http
       port: 8000
@@ -30,7 +30,7 @@ metadata:
 spec:
   type: NodePort
   selector:
-    app: cloudsieve-backend
+    app.kubernetes.io/name: cloudsieve-backend
   ports:
     - name: http
       port: 8000
