@@ -177,23 +177,24 @@ jobs:
           fi
 
           # Inspect claims without signature verification
-          python3 -c "
-import json, base64, os
-token = os.environ.get('OIDC_TOKEN', '')
-parts = token.split('.')
-if len(parts) == 3:
-    payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=='))
-    sub = payload.get('sub')
-    aud = payload.get('aud')
-    iss = payload.get('iss')
-    repo = payload.get('repository')
-    print(f'OIDC Claims: sub={sub}, aud={aud}, iss={iss}, repo={repo}')
-    with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
-        f.write(f'- **OIDC sub**: \`{sub}\`\n')
-        f.write(f'- **OIDC aud**: \`{aud}\`\n')
-        f.write(f'- **OIDC iss**: \`{iss}\`\n')
-        f.write(f'- **OIDC repo**: \`{repo}\`\n')
-"
+          cat << 'PYEOF' > /tmp/parse_jwt.py
+          import json, base64, os
+          token = os.environ.get('OIDC_TOKEN', '')
+          parts = token.split('.')
+          if len(parts) == 3:
+              payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=='))
+              sub = payload.get('sub')
+              aud = payload.get('aud')
+              iss = payload.get('iss')
+              repo = payload.get('repository')
+              print(f'OIDC Claims: sub={sub}, aud={aud}, iss={iss}, repo={repo}')
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+                  f.write(f'- **OIDC sub**: `{sub}`\n')
+                  f.write(f'- **OIDC aud**: `{aud}`\n')
+                  f.write(f'- **OIDC iss**: `{iss}`\n')
+                  f.write(f'- **OIDC repo**: `{repo}`\n')
+          PYEOF
+          OIDC_TOKEN="$OIDC_TOKEN" python3 /tmp/parse_jwt.py
 
           echo "Attempting sts:AssumeRoleWithWebIdentity..."
           ASSUME_OUT=$(aws sts assume-role-with-web-identity \
@@ -203,9 +204,9 @@ if len(parts) == 3:
             --duration-seconds 3600 \
             --region "${{ env.AWS_REGION }}" 2>&1) || {
               echo "❌ AssumeRoleWithWebIdentity failed:" >> $GITHUB_STEP_SUMMARY
-              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
               echo "$ASSUME_OUT" >> $GITHUB_STEP_SUMMARY
-              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
               echo "$ASSUME_OUT"
               exit 1
             }
