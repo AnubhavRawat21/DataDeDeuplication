@@ -144,12 +144,85 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Authenticate to AWS via OIDC (zero secrets)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ env.ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          audience: sts.amazonaws.com
+      - name: Authenticate to AWS (OIDC with diagnostic fallback)
+        id: aws-auth
+        env:
+          AWS_KEY: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SEC: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          echo "### AWS Authentication Diagnostics" >> $GITHUB_STEP_SUMMARY
+
+          # Check if secret keys are available
+          if [ -n "$AWS_KEY" ] && [ -n "$AWS_SEC" ]; then
+            echo "Using repository secrets (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)" >> $GITHUB_STEP_SUMMARY
+            echo "AWS_ACCESS_KEY_ID=$AWS_KEY" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=$AWS_SEC" >> $GITHUB_ENV
+            echo "AWS_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          echo "Requesting OIDC token from GitHub Actions token service..."
+          if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "❌ ACTIONS_ID_TOKEN_REQUEST_URL is NOT set! OIDC permission denied by GitHub." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          TOKEN_RESP=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
+          OIDC_TOKEN=$(echo "$TOKEN_RESP" | jq -r .value // empty)
+
+          if [ -z "$OIDC_TOKEN" ]; then
+            echo "❌ Failed to retrieve OIDC token. Response: $TOKEN_RESP" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          # Inspect claims without signature verification
+          python3 -c "
+import json, base64, os
+token = os.environ.get('OIDC_TOKEN', '')
+parts = token.split('.')
+if len(parts) == 3:
+    payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=='))
+    sub = payload.get('sub')
+    aud = payload.get('aud')
+    iss = payload.get('iss')
+    repo = payload.get('repository')
+    print(f'OIDC Claims: sub={sub}, aud={aud}, iss={iss}, repo={repo}')
+    with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+        f.write(f'- **OIDC sub**: \`{sub}\`\n')
+        f.write(f'- **OIDC aud**: \`{aud}\`\n')
+        f.write(f'- **OIDC iss**: \`{iss}\`\n')
+        f.write(f'- **OIDC repo**: \`{repo}\`\n')
+"
+
+          echo "Attempting sts:AssumeRoleWithWebIdentity..."
+          ASSUME_OUT=$(aws sts assume-role-with-web-identity \
+            --role-arn "${{ env.ROLE_ARN }}" \
+            --role-session-name "GitHubActions-${{ github.run_id }}" \
+            --web-identity-token "$OIDC_TOKEN" \
+            --duration-seconds 3600 \
+            --region "${{ env.AWS_REGION }}" 2>&1) || {
+              echo "❌ AssumeRoleWithWebIdentity failed:" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "$ASSUME_OUT" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "$ASSUME_OUT"
+              exit 1
+            }
+
+          echo "✅ OIDC AssumeRole succeeded!" >> $GITHUB_STEP_SUMMARY
+          export AWS_ACCESS_KEY_ID=$(echo "$ASSUME_OUT" | jq -r .Credentials.AccessKeyId)
+          export AWS_SECRET_ACCESS_KEY=$(echo "$ASSUME_OUT" | jq -r .Credentials.SecretAccessKey)
+          export AWS_SESSION_TOKEN=$(echo "$ASSUME_OUT" | jq -r .Credentials.SessionToken)
+          export AWS_DEFAULT_REGION="${{ env.AWS_REGION }}"
+
+          echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN" >> $GITHUB_ENV
+          echo "AWS_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
+          echo "::add-mask::$AWS_ACCESS_KEY_ID"
+          echo "::add-mask::$AWS_SECRET_ACCESS_KEY"
+          echo "::add-mask::$AWS_SESSION_TOKEN"
 
       - name: Log in to Amazon ECR
         id: login-ecr
@@ -203,12 +276,41 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Authenticate to AWS via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ env.ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          audience: sts.amazonaws.com
+      - name: Authenticate to AWS (OIDC with diagnostic fallback)
+        env:
+          AWS_KEY: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SEC: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          if [ -n "$AWS_KEY" ] && [ -n "$AWS_SEC" ]; then
+            echo "AWS_ACCESS_KEY_ID=$AWS_KEY" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=$AWS_SEC" >> $GITHUB_ENV
+            echo "AWS_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          TOKEN_RESP=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
+          OIDC_TOKEN=$(echo "$TOKEN_RESP" | jq -r .value // empty)
+
+          ASSUME_OUT=$(aws sts assume-role-with-web-identity \
+            --role-arn "${{ env.ROLE_ARN }}" \
+            --role-session-name "GitHubActions-deploy-${{ github.run_id }}" \
+            --web-identity-token "$OIDC_TOKEN" \
+            --duration-seconds 3600 \
+            --region "${{ env.AWS_REGION }}")
+
+          export AWS_ACCESS_KEY_ID=$(echo "$ASSUME_OUT" | jq -r .Credentials.AccessKeyId)
+          export AWS_SECRET_ACCESS_KEY=$(echo "$ASSUME_OUT" | jq -r .Credentials.SecretAccessKey)
+          export AWS_SESSION_TOKEN=$(echo "$ASSUME_OUT" | jq -r .Credentials.SessionToken)
+          export AWS_DEFAULT_REGION="${{ env.AWS_REGION }}"
+
+          echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN" >> $GITHUB_ENV
+          echo "AWS_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
+          echo "::add-mask::$AWS_ACCESS_KEY_ID"
+          echo "::add-mask::$AWS_SECRET_ACCESS_KEY"
+          echo "::add-mask::$AWS_SESSION_TOKEN"
 
       - name: Configure kubectl for EKS
         run: |
