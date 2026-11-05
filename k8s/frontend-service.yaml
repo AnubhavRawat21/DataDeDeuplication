@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudsieve-frontend-svc
+  namespace: cloudsieve
+  labels:
+    app.kubernetes.io/name: cloudsieve-frontend
+    app.kubernetes.io/part-of: cloudsieve
+spec:
+  type: ClusterIP
+  selector:
+    app: cloudsieve-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP

@@ -1,4 +1,4 @@
-name: CloudSieve Pro CI/CD
+name: CloudSieve Pro DevSecOps CI/CD
 
 on:
   push:
@@ -7,8 +7,10 @@ on:
     branches: [main]
 
 env:
-  DOCKER_BUILDKIT: 1
-  COMPOSE_DOCKER_CLI_BUILD: 1
+  AWS_REGION: ap-southeast-2
+  EKS_CLUSTER_NAME: cloudsieve-eks
+  ECR_BACKEND_REPO: cloudsieve-backend
+  ECR_FRONTEND_REPO: cloudsieve-frontend
 
 jobs:
   # ── Stage 1: Lint ──
@@ -44,7 +46,7 @@ jobs:
           npm ci --silent
           npm run build
 
-  # ── Stage 2: Test ──
+  # ── Stage 2: Automated Testing ──
   test:
     name: "🧪 Test"
     runs-on: ubuntu-latest
@@ -63,48 +65,116 @@ jobs:
           pip install -r requirements.txt
           pip install pytest httpx
 
-      - name: Run backend tests
+      - name: Run backend pytest suite
         run: |
           cd backend
           python -m pytest tests/ -v --tb=short
 
-  # ── Stage 3: Docker Build ──
-  docker-build:
-    name: "🐳 Docker Build"
+  # ── Stage 3: DevSecOps Security Scanning ──
+  security-scan:
+    name: "🛡️ DevSecOps Scan"
     runs-on: ubuntu-latest
     needs: test
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build backend image
-        run: |
-          docker build -f docker/Dockerfile.backend -t cloudsieve-backend:${{ github.sha }} ./backend
+      - name: Run Checkov IaC Security Scanner
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: terraform/
+          framework: terraform
+          soft_fail: true
+          output_format: cli
 
-      - name: Build frontend image
+      - name: Build local images for vulnerability scanning
         run: |
-          docker build -f docker/Dockerfile.frontend -t cloudsieve-frontend:${{ github.sha }} ./frontend
+          docker build -f docker/Dockerfile.backend -t cloudsieve-backend:scan ./backend
+          docker build -f docker/Dockerfile.frontend -t cloudsieve-frontend:scan ./frontend
 
-      - name: Verify images
-        run: |
-          docker images | grep cloudsieve
-          echo "✅ Both images built successfully"
+      - name: Run Trivy vulnerability scanner on Backend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'cloudsieve-backend:scan'
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
 
-  # ── Stage 4: Deploy ──
-  deploy:
-    name: "🚀 Deploy"
+      - name: Run Trivy vulnerability scanner on Frontend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'cloudsieve-frontend:scan'
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+  # ── Stage 4: Build & Push to Amazon ECR ──
+  build-and-push-ecr:
+    name: "🐳 Build & Push ECR"
     runs-on: ubuntu-latest
-    needs: docker-build
+    needs: security-scan
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - name: Deploy to Render
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push images to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "🚀 Deploying to Render.com..."
-          if [ -n "${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}" ]; then
-            curl -s "${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}"
-            echo "✅ Backend deploy triggered"
-          fi
-          if [ -n "${{ secrets.RENDER_DEPLOY_HOOK_FRONTEND }}" ]; then
-            curl -s "${{ secrets.RENDER_DEPLOY_HOOK_FRONTEND }}"
-            echo "✅ Frontend deploy triggered"
-          fi
-          echo "✅ Deployment complete"
+          # Backend Image
+          docker build -f docker/Dockerfile.backend -t $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_BACKEND_REPO:latest ./backend
+          docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:latest
+
+          # Frontend Image
+          docker build -f docker/Dockerfile.frontend -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest ./frontend
+          docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest
+
+  # ── Stage 5: Deploy to Amazon EKS ──
+  deploy-eks:
+    name: "🚀 Deploy to Amazon EKS"
+    runs-on: ubuntu-latest
+    needs: build-and-push-ecr
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+      - name: Deploy Kubernetes Manifests
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/storage.yaml
+          kubectl apply -f k8s/backend-service.yaml
+          kubectl apply -f k8s/frontend-service.yaml
+          kubectl apply -f k8s/backend-deployment.yaml
+          kubectl apply -f k8s/frontend-deployment.yaml
+          kubectl apply -f k8s/ingress.yaml
+
+      - name: Verify Deployment Rollout
+        run: |
+          kubectl rollout status deployment/cloudsieve-backend -n cloudsieve --timeout=180s
+          kubectl rollout status deployment/cloudsieve-frontend -n cloudsieve --timeout=180s

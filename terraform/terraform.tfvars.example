@@ -23,3 +23,7 @@ allowed_ssh_cidr  = "0.0.0.0/0"
 # If left empty (""), Terraform automatically generates a 4096-bit RSA key
 # and saves it locally as `cloudsieve-key.pem`.
 existing_key_name = ""
+
+# Optional Kubernetes & ECR flags (set to true once IAM permissions are granted)
+enable_ecr        = false
+enable_eks        = false
