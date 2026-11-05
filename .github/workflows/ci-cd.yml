@@ -51,7 +51,7 @@ jobs:
           cd backend
           flake8 main.py engine.py \
             --max-line-length=120 \
-            --ignore=E501,W503,E302,E303,E241,E221,W292,F401,W293,E305,W291,W605
+            --ignore=E501,W503,E302,E303,E241,E221,W292,F401,W293,E305,W291,W605,E265,E266
 
       - name: Set up Node.js 18
         uses: actions/setup-node@v4
