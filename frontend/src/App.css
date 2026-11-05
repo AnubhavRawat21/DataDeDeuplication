@@ -111,11 +111,11 @@
 }
 
 .page-transition {
-  opacity: 0;
-  /* animation is gated by .visible class to prevent flash-of-invisible on mount */
+  opacity: 1;
 }
 
 .page-transition.visible {
+  opacity: 1;
   animation: fadeIn 0.4s ease forwards;
 }
 

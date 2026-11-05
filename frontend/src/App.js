@@ -24,10 +24,7 @@ const NAV_ITEMS = [
 ];
 
 function PageTransition({ children }) {
-  const location = useLocation();
-  const [show, setShow] = useState(false);
-  useEffect(() => { setShow(false); requestAnimationFrame(() => setShow(true)); }, [location.pathname]);
-  return <div className={`page-transition ${show ? 'visible' : ''}`}>{children}</div>;
+  return <div className="page-transition visible">{children}</div>;
 }
 
 export default function App() {
