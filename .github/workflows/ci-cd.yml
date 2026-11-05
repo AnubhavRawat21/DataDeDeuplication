@@ -1,4 +1,10 @@
-name: CloudSieve Pro DevSecOps CI/CD
+name: CloudSieve Pro — AWS DevSecOps Pipeline
+
+# ─────────────────────────────────────────────────────────────────────────────
+# All heavy workloads (Docker builds, security scans, EKS deployments) run on
+# AWS CodeBuild — zero local or GitHub-runner compute for the actual work.
+# GitHub Actions is the lightweight orchestrator only.
+# ─────────────────────────────────────────────────────────────────────────────
 
 on:
   push:
@@ -7,13 +13,16 @@ on:
     branches: [main]
 
 env:
-  AWS_REGION: ap-southeast-2
-  EKS_CLUSTER_NAME: cloudsieve-eks
-  ECR_BACKEND_REPO: cloudsieve-backend
-  ECR_FRONTEND_REPO: cloudsieve-frontend
+  AWS_REGION:          ap-southeast-2
+  EKS_CLUSTER_NAME:    cloudsieve-eks
+  ECR_BACKEND_REPO:    cloudsieve-backend
+  ECR_FRONTEND_REPO:   cloudsieve-frontend
+  CODEBUILD_BUILD:     cloudsieve-pro-build
+  CODEBUILD_DEPLOY:    cloudsieve-pro-deploy
 
 jobs:
-  # ── Stage 1: Lint ──
+
+  # ── Stage 1: Lint (lightweight, runs on GitHub) ──────────────────────────
   lint:
     name: "🔍 Lint"
     runs-on: ubuntu-latest
@@ -25,13 +34,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python linters
-        run: pip install flake8
-
       - name: Lint backend
         run: |
+          pip install flake8
           cd backend
-          flake8 main.py engine.py --max-line-length=120 --ignore=E501,W503,E302,E303,E241,E221,W292,F401,W293,E305
+          flake8 main.py engine.py \
+            --max-line-length=120 \
+            --ignore=E501,W503,E302,E303,E241,E221,W292,F401,W293,E305
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -40,13 +49,13 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Build frontend
+      - name: Build frontend (lint check)
         run: |
           cd frontend
           npm ci --silent
           npm run build
 
-  # ── Stage 2: Automated Testing ──
+  # ── Stage 2: Tests (lightweight, runs on GitHub) ──────────────────────────
   test:
     name: "🧪 Test"
     runs-on: ubuntu-latest
@@ -59,26 +68,21 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Run pytest suite
         run: |
           cd backend
-          pip install -r requirements.txt
-          pip install pytest httpx
-
-      - name: Run backend pytest suite
-        run: |
-          cd backend
+          pip install -r requirements.txt pytest httpx
           python -m pytest tests/ -v --tb=short
 
-  # ── Stage 3: DevSecOps Security Scanning ──
-  security-scan:
-    name: "🛡️ DevSecOps Scan"
+  # ── Stage 3: IaC Security Scan (runs on GitHub — no AWS access needed) ───
+  iac-scan:
+    name: "🛡️ IaC Security Scan"
     runs-on: ubuntu-latest
     needs: test
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Checkov IaC Security Scanner
+      - name: Checkov — Terraform IaC scan
         uses: bridgecrewio/checkov-action@master
         with:
           directory: terraform/
@@ -86,95 +90,106 @@ jobs:
           soft_fail: true
           output_format: cli
 
-      - name: Build local images for vulnerability scanning
-        run: |
-          docker build -f docker/Dockerfile.backend -t cloudsieve-backend:scan ./backend
-          docker build -f docker/Dockerfile.frontend -t cloudsieve-frontend:scan ./frontend
-
-      - name: Run Trivy vulnerability scanner on Backend
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'cloudsieve-backend:scan'
-          format: 'table'
-          exit-code: '0'
-          ignore-unfixed: true
-          severity: 'CRITICAL,HIGH'
-
-      - name: Run Trivy vulnerability scanner on Frontend
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'cloudsieve-frontend:scan'
-          format: 'table'
-          exit-code: '0'
-          ignore-unfixed: true
-          severity: 'CRITICAL,HIGH'
-
-  # ── Stage 4: Build & Push to Amazon ECR ──
-  build-and-push-ecr:
-    name: "🐳 Build & Push ECR"
+  # ── Stage 4: Build & Push on AWS CodeBuild ───────────────────────────────
+  # Docker build + ECR push + Trivy image scan all run on AWS CodeBuild.
+  # No Docker daemon on GitHub runners.
+  build-on-aws:
+    name: "🐳 Build & Push (AWS CodeBuild)"
     runs-on: ubuntu-latest
-    needs: security-scan
+    needs: [test, iac-scan]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region:            ${{ env.AWS_REGION }}
 
-      - name: Log in to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build, tag, and push images to Amazon ECR
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+      - name: Trigger AWS CodeBuild — Build & Push images
+        id: codebuild-build
         run: |
-          # Backend Image
-          docker build -f docker/Dockerfile.backend -t $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_BACKEND_REPO:latest ./backend
-          docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:latest
+          BUILD_ID=$(aws codebuild start-build \
+            --project-name ${{ env.CODEBUILD_BUILD }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'build.id' \
+            --output text)
+          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "Started CodeBuild: $BUILD_ID"
 
-          # Frontend Image
-          docker build -f docker/Dockerfile.frontend -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest ./frontend
-          docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest
+      - name: Wait for CodeBuild to finish
+        run: |
+          BUILD_ID="${{ steps.codebuild-build.outputs.build_id }}"
+          echo "Waiting for build: $BUILD_ID"
+          while true; do
+            STATUS=$(aws codebuild batch-get-builds \
+              --ids "$BUILD_ID" \
+              --query 'builds[0].buildStatus' \
+              --output text)
+            echo "Status: $STATUS"
+            case $STATUS in
+              SUCCEEDED)
+                echo "✅ CodeBuild succeeded"
+                exit 0 ;;
+              FAILED|FAULT|TIMED_OUT|STOPPED)
+                echo "❌ CodeBuild failed with status: $STATUS"
+                exit 1 ;;
+              *)
+                sleep 20 ;;
+            esac
+          done
 
-  # ── Stage 5: Deploy to Amazon EKS ──
-  deploy-eks:
-    name: "🚀 Deploy to Amazon EKS"
+  # ── Stage 5: Deploy to EKS on AWS CodeBuild ──────────────────────────────
+  # kubectl + k8s manifest apply runs on AWS CodeBuild — no local kubectl.
+  deploy-on-aws:
+    name: "🚀 Deploy to EKS (AWS CodeBuild)"
     runs-on: ubuntu-latest
-    needs: build-and-push-ecr
+    needs: build-on-aws
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region:            ${{ env.AWS_REGION }}
 
-      - name: Update kubeconfig for EKS
+      - name: Trigger AWS CodeBuild — Deploy to EKS
+        id: codebuild-deploy
         run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+          BUILD_ID=$(aws codebuild start-build \
+            --project-name ${{ env.CODEBUILD_DEPLOY }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'build.id' \
+            --output text)
+          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "Started CodeBuild deploy: $BUILD_ID"
 
-      - name: Deploy Kubernetes Manifests
+      - name: Wait for Deploy CodeBuild to finish
         run: |
-          kubectl apply -f k8s/namespace.yaml
-          kubectl apply -f k8s/storage.yaml
-          kubectl apply -f k8s/backend-service.yaml
-          kubectl apply -f k8s/frontend-service.yaml
-          kubectl apply -f k8s/backend-deployment.yaml
-          kubectl apply -f k8s/frontend-deployment.yaml
-          kubectl apply -f k8s/ingress.yaml
+          BUILD_ID="${{ steps.codebuild-deploy.outputs.build_id }}"
+          echo "Waiting for deploy: $BUILD_ID"
+          while true; do
+            STATUS=$(aws codebuild batch-get-builds \
+              --ids "$BUILD_ID" \
+              --query 'builds[0].buildStatus' \
+              --output text)
+            echo "Status: $STATUS"
+            case $STATUS in
+              SUCCEEDED)
+                echo "✅ Deployment succeeded"
+                exit 0 ;;
+              FAILED|FAULT|TIMED_OUT|STOPPED)
+                echo "❌ Deployment failed with status: $STATUS"
+                exit 1 ;;
+              *)
+                sleep 20 ;;
+            esac
+          done
 
-      - name: Verify Deployment Rollout
+      - name: Get ALB endpoint
         run: |
-          kubectl rollout status deployment/cloudsieve-backend -n cloudsieve --timeout=180s
-          kubectl rollout status deployment/cloudsieve-frontend -n cloudsieve --timeout=180s
+          aws codebuild batch-get-builds \
+            --ids "${{ steps.codebuild-deploy.outputs.build_id }}" \
+            --query 'builds[0].logs.{group:groupName,stream:streamName}' \
+            --output table
