@@ -154,9 +154,10 @@ resource "aws_security_group" "ec2" {
   }
 }
 
-# ── 4. IAM Role & Instance Profile for CloudWatch & SSM ──
+# ── 4. Optional IAM Role & Instance Profile ──
 resource "aws_iam_role" "ec2_role" {
-  name = "${var.project_name}-ec2-role"
+  count = var.enable_iam_role ? 1 : 0
+  name  = "${var.project_name}-ec2-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -177,18 +178,21 @@ resource "aws_iam_role" "ec2_role" {
 }
 
 resource "aws_iam_role_policy_attachment" "cloudwatch_policy" {
-  role       = aws_iam_role.ec2_role.name
+  count      = var.enable_iam_role ? 1 : 0
+  role       = aws_iam_role.ec2_role[0].name
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 
 resource "aws_iam_role_policy_attachment" "ssm_policy" {
-  role       = aws_iam_role.ec2_role.name
+  count      = var.enable_iam_role ? 1 : 0
+  role       = aws_iam_role.ec2_role[0].name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
 resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "${var.project_name}-instance-profile"
-  role = aws_iam_role.ec2_role.name
+  count = var.enable_iam_role ? 1 : 0
+  name  = "${var.project_name}-instance-profile"
+  role  = aws_iam_role.ec2_role[0].name
 }
 
 # ── 5. SSH Key Pair Management ──
@@ -215,8 +219,9 @@ locals {
   key_name = var.existing_key_name != "" ? var.existing_key_name : aws_key_pair.generated[0].key_name
 }
 
-# ── 6. CloudWatch Log Group & Alarms ──
+# ── 6. CloudWatch Metric Alarms & Optional Logs ──
 resource "aws_cloudwatch_log_group" "app_logs" {
+  count             = var.enable_cloudwatch_logs ? 1 : 0
   name              = "/aws/ec2/${var.project_name}"
   retention_in_days = 30
 
@@ -271,7 +276,7 @@ resource "aws_instance" "server" {
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.ec2.id]
-  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+  iam_instance_profile   = var.enable_iam_role ? aws_iam_instance_profile.ec2_profile[0].name : null
   key_name               = local.key_name
 
   root_block_device {
@@ -286,11 +291,12 @@ resource "aws_instance" "server" {
   }
 
   user_data = templatefile("${path.module}/templates/user_data.sh.tpl", {
-    aws_region      = var.aws_region
-    project_name    = var.project_name
-    github_repo_url = var.github_repo_url
-    github_branch   = var.github_branch
-    log_group_name  = aws_cloudwatch_log_group.app_logs.name
+    aws_region             = var.aws_region
+    project_name           = var.project_name
+    github_repo_url        = var.github_repo_url
+    github_branch          = var.github_branch
+    enable_cloudwatch_logs = var.enable_cloudwatch_logs
+    log_group_name         = var.enable_cloudwatch_logs ? aws_cloudwatch_log_group.app_logs[0].name : ""
   })
 
   tags = {

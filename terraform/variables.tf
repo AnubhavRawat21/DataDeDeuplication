@@ -76,3 +76,15 @@ variable "existing_key_name" {
   type        = string
   default     = ""
 }
+
+variable "enable_iam_role" {
+  description = "Whether to create and attach an IAM role/instance profile to the EC2 instance (set to false if terraform-user lacks iam:CreateRole permission)"
+  type        = bool
+  default     = false
+}
+
+variable "enable_cloudwatch_logs" {
+  description = "Whether to create a CloudWatch Log Group for container logs (set to false if terraform-user lacks logs:CreateLogGroup permission)"
+  type        = bool
+  default     = false
+}

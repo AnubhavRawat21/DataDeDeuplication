@@ -22,8 +22,8 @@ output "health_check_url" {
 }
 
 output "cloudwatch_log_group" {
-  description = "Name of the Amazon CloudWatch Log Group"
-  value       = aws_cloudwatch_log_group.app_logs.name
+  description = "Name of the Amazon CloudWatch Log Group (if enabled)"
+  value       = var.enable_cloudwatch_logs ? aws_cloudwatch_log_group.app_logs[0].name : "Disabled (IAM restricted)"
 }
 
 output "ssh_command" {
