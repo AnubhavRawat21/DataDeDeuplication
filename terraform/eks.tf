@@ -181,7 +181,7 @@ resource "aws_eks_cluster" "main" {
   count    = var.enable_eks ? 1 : 0
   name     = var.eks_cluster_name
   role_arn = aws_iam_role.eks_cluster_role[0].arn
-  version  = "1.30"
+  version  = "1.31"
 
   vpc_config {
     subnet_ids = [

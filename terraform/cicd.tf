@@ -28,7 +28,11 @@ resource "aws_iam_openid_connect_provider" "github" {
   count           = var.enable_cicd ? 1 : 0
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [data.tls_certificate.github[0].certificates[0].sha1_fingerprint]
+  thumbprint_list = [
+    "6938fd4d98bab03faadb97b34396831e3780aea1",
+    "1c587612c62c9540ff93988f6159f80721262d18",
+    data.tls_certificate.github[0].certificates[0].sha1_fingerprint
+  ]
 
   tags = {
     Name = "${var.project_name}-github-oidc"
@@ -57,7 +61,10 @@ data "aws_iam_policy_document" "github_actions_assume" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:*"]
+      values   = [
+        "repo:${var.github_repository}:*",
+        "repo:${lower(var.github_repository)}:*"
+      ]
     }
   }
 }
