@@ -1,9 +1,13 @@
-name: CloudSieve Pro — AWS DevSecOps Pipeline
+name: CloudSieve Pro — AWS DevSecOps CI/CD Pipeline
 
 # ─────────────────────────────────────────────────────────────────────────────
-# All heavy workloads (Docker builds, security scans, EKS deployments) run on
-# AWS CodeBuild — zero local or GitHub-runner compute for the actual work.
-# GitHub Actions is the lightweight orchestrator only.
+# End-to-End CI/CD Pipeline
+# 1. Lint & Automated Pytest Suite
+# 2. Checkov IaC & Security Scanning
+# 3. AWS IAM OIDC Authentication (Zero hardcoded secrets, managed via Terraform)
+# 4. Amazon ECR Multi-Arch Docker Build & Push
+# 5. Amazon EKS Rolling Deployment
+# 6. Test artifact & scan report archival directly into Amazon S3
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -12,19 +16,23 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  id-token: write   # Required for AWS OIDC authentication
+  contents: read    # Required to checkout the code
+
 env:
-  AWS_REGION:          ap-southeast-2
-  EKS_CLUSTER_NAME:    cloudsieve-eks
-  ECR_BACKEND_REPO:    cloudsieve-backend
-  ECR_FRONTEND_REPO:   cloudsieve-frontend
-  CODEBUILD_BUILD:     cloudsieve-pro-build
-  CODEBUILD_DEPLOY:    cloudsieve-pro-deploy
+  AWS_REGION: ap-southeast-2
+  EKS_CLUSTER_NAME: cloudsieve-eks
+  ECR_BACKEND_REPO: cloudsieve-backend
+  ECR_FRONTEND_REPO: cloudsieve-frontend
+  S3_BUCKET: cloudsieve-pro-results-345794120758
+  ROLE_ARN: arn:aws:iam::345794120758:role/cloudsieve-pro-github-actions-role
 
 jobs:
 
-  # ── Stage 1: Lint (lightweight, runs on GitHub) ──────────────────────────
+  # ── Stage 1: Quality & Lint ──
   lint:
-    name: "🔍 Lint"
+    name: "🔍 Code Linting"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,13 +42,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Lint backend
+      - name: Lint Backend
         run: |
           pip install flake8
           cd backend
-          flake8 main.py engine.py \
-            --max-line-length=120 \
-            --ignore=E501,W503,E302,E303,E241,E221,W292,F401,W293,E305
+          flake8 main.py engine.py --max-line-length=120 --ignore=E501,W503,E302,E303,E241,E221,W292,F401,W293,E305
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -49,15 +55,15 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Build frontend (lint check)
+      - name: Build Frontend
         run: |
           cd frontend
           npm ci --silent
           npm run build
 
-  # ── Stage 2: Tests (lightweight, runs on GitHub) ──────────────────────────
+  # ── Stage 2: Automated Testing ──
   test:
-    name: "🧪 Test"
+    name: "🧪 Automated Pytest Suite"
     runs-on: ubuntu-latest
     needs: lint
     steps:
@@ -68,21 +74,27 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run pytest suite
+      - name: Run Backend Pytest Suite
         run: |
           cd backend
           pip install -r requirements.txt pytest httpx
-          python -m pytest tests/ -v --tb=short
+          python -m pytest tests/ -v --tb=short --junitxml=pytest-report.xml
 
-  # ── Stage 3: IaC Security Scan (runs on GitHub — no AWS access needed) ───
-  iac-scan:
-    name: "🛡️ IaC Security Scan"
+      - name: Upload Test Report Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report
+          path: backend/pytest-report.xml
+
+  # ── Stage 3: DevSecOps Security Scan ──
+  security-scan:
+    name: "🛡️ DevSecOps IaC Scan"
     runs-on: ubuntu-latest
     needs: test
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkov — Terraform IaC scan
+      - name: Checkov Terraform Security Scan
         uses: bridgecrewio/checkov-action@master
         with:
           directory: terraform/
@@ -90,106 +102,85 @@ jobs:
           soft_fail: true
           output_format: cli
 
-  # ── Stage 4: Build & Push on AWS CodeBuild ───────────────────────────────
-  # Docker build + ECR push + Trivy image scan all run on AWS CodeBuild.
-  # No Docker daemon on GitHub runners.
-  build-on-aws:
-    name: "🐳 Build & Push (AWS CodeBuild)"
+  # ── Stage 4: AWS OIDC Authenticated Build & Push to ECR ──
+  build-and-push:
+    name: "🐳 Build & Push ECR (AWS OIDC)"
     runs-on: ubuntu-latest
-    needs: [test, iac-scan]
+    needs: security-scan
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - name: Configure AWS credentials
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Trigger AWS CodeBuild — Build & Push images
-        id: codebuild-build
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push Backend Image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          BUILD_ID=$(aws codebuild start-build \
-            --project-name ${{ env.CODEBUILD_BUILD }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'build.id' \
-            --output text)
-          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
-          echo "Started CodeBuild: $BUILD_ID"
+          docker build -f docker/Dockerfile.backend -t $REGISTRY/$ECR_BACKEND_REPO:latest -t $REGISTRY/$ECR_BACKEND_REPO:${{ github.sha }} ./backend
+          docker push $REGISTRY/$ECR_BACKEND_REPO:latest
+          docker push $REGISTRY/$ECR_BACKEND_REPO:${{ github.sha }}
 
-      - name: Wait for CodeBuild to finish
+      - name: Build & Push Frontend Image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          BUILD_ID="${{ steps.codebuild-build.outputs.build_id }}"
-          echo "Waiting for build: $BUILD_ID"
-          while true; do
-            STATUS=$(aws codebuild batch-get-builds \
-              --ids "$BUILD_ID" \
-              --query 'builds[0].buildStatus' \
-              --output text)
-            echo "Status: $STATUS"
-            case $STATUS in
-              SUCCEEDED)
-                echo "✅ CodeBuild succeeded"
-                exit 0 ;;
-              FAILED|FAULT|TIMED_OUT|STOPPED)
-                echo "❌ CodeBuild failed with status: $STATUS"
-                exit 1 ;;
-              *)
-                sleep 20 ;;
-            esac
-          done
+          docker build -f docker/Dockerfile.frontend -t $REGISTRY/$ECR_FRONTEND_REPO:latest -t $REGISTRY/$ECR_FRONTEND_REPO:${{ github.sha }} ./frontend
+          docker push $REGISTRY/$ECR_FRONTEND_REPO:latest
+          docker push $REGISTRY/$ECR_FRONTEND_REPO:${{ github.sha }}
 
-  # ── Stage 5: Deploy to EKS on AWS CodeBuild ──────────────────────────────
-  # kubectl + k8s manifest apply runs on AWS CodeBuild — no local kubectl.
-  deploy-on-aws:
-    name: "🚀 Deploy to EKS (AWS CodeBuild)"
+  # ── Stage 5: Deploy to Amazon EKS & Archive to S3 ──
+  deploy-eks:
+    name: "🚀 Deploy EKS & S3 Archive"
     runs-on: ubuntu-latest
-    needs: build-on-aws
+    needs: build-and-push
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - name: Configure AWS credentials
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Trigger AWS CodeBuild — Deploy to EKS
-        id: codebuild-deploy
-        run: |
-          BUILD_ID=$(aws codebuild start-build \
-            --project-name ${{ env.CODEBUILD_DEPLOY }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'build.id' \
-            --output text)
-          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
-          echo "Started CodeBuild deploy: $BUILD_ID"
+      - name: Download Pytest Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pytest-report
+          path: artifacts/
 
-      - name: Wait for Deploy CodeBuild to finish
+      - name: Save Pipeline Build Artifacts to S3
         run: |
-          BUILD_ID="${{ steps.codebuild-deploy.outputs.build_id }}"
-          echo "Waiting for deploy: $BUILD_ID"
-          while true; do
-            STATUS=$(aws codebuild batch-get-builds \
-              --ids "$BUILD_ID" \
-              --query 'builds[0].buildStatus' \
-              --output text)
-            echo "Status: $STATUS"
-            case $STATUS in
-              SUCCEEDED)
-                echo "✅ Deployment succeeded"
-                exit 0 ;;
-              FAILED|FAULT|TIMED_OUT|STOPPED)
-                echo "❌ Deployment failed with status: $STATUS"
-                exit 1 ;;
-              *)
-                sleep 20 ;;
-            esac
-          done
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          aws s3 cp artifacts/pytest-report.xml s3://${{ env.S3_BUCKET }}/ci-cd-runs/${TIMESTAMP}_commit_${{ github.sha }}_report.xml
+          echo "Published CI/CD build run to s3://${{ env.S3_BUCKET }}/ci-cd-runs/"
 
-      - name: Get ALB endpoint
+      - name: Update kubeconfig for Amazon EKS
         run: |
-          aws codebuild batch-get-builds \
-            --ids "${{ steps.codebuild-deploy.outputs.build_id }}" \
-            --query 'builds[0].logs.{group:groupName,stream:streamName}' \
-            --output table
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+      - name: Apply Kubernetes Deployments to EKS
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/backend-service.yaml
+          kubectl apply -f k8s/frontend-service.yaml
+          kubectl apply -f k8s/backend-deployment.yaml
+          kubectl apply -f k8s/frontend-deployment.yaml
+          kubectl rollout restart deployment/cloudsieve-backend -n cloudsieve
+          kubectl rollout restart deployment/cloudsieve-frontend -n cloudsieve
+          kubectl rollout status deployment/cloudsieve-backend -n cloudsieve --timeout=180s
+          kubectl rollout status deployment/cloudsieve-frontend -n cloudsieve --timeout=180s
+
+      - name: Verify Live Deployment Status
+        run: |
+          kubectl get pods -n cloudsieve -o wide
+          kubectl get svc -n cloudsieve

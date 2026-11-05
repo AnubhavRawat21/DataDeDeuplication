@@ -46,6 +46,23 @@ OUTPUT_DIR = Path("outputs")
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+# S3 Results Storage Bucket
+S3_RESULTS_BUCKET = os.environ.get("S3_RESULTS_BUCKET", "cloudsieve-pro-results-345794120758")
+AWS_REGION = os.environ.get("AWS_REGION", "ap-southeast-2")
+
+def upload_result_to_s3(local_file_path: Path, s3_key: str):
+    """Save processed CSV outputs and artifacts to Amazon S3."""
+    try:
+        import boto3
+        s3_client = boto3.client("s3", region_name=AWS_REGION)
+        s3_client.upload_file(str(local_file_path), S3_RESULTS_BUCKET, s3_key)
+        print(f"[S3] Uploaded {local_file_path.name} to s3://{S3_RESULTS_BUCKET}/{s3_key}")
+        return f"s3://{S3_RESULTS_BUCKET}/{s3_key}"
+    except Exception as err:
+        print(f"[S3 Warning] Could not upload {local_file_path.name} to S3: {err}")
+        return None
+
+
 # ─────────────────────────────────────────────
 # STATE: Pipeline progress & results
 # ─────────────────────────────────────────────
@@ -131,6 +148,9 @@ def run_pipeline_in_thread(job_id, file_path, fuzzy_col, threshold):
         clean_path = OUTPUT_DIR / f"{job_id}_clean.csv"
         result["full_df"].to_csv(clean_path, index=False)
         
+        # Upload clean result to S3
+        s3_uri = upload_result_to_s3(clean_path, f"results/{job_id}/{job_id}_clean.csv")
+
         # Remove the dataframe from the result dict before storing in memory/history
         # because it cannot be JSON serialized
         del result["full_df"]
@@ -144,6 +164,7 @@ def run_pipeline_in_thread(job_id, file_path, fuzzy_col, threshold):
             "result": result,
             "elapsed": elapsed,
             "output_checksum": output_hash,
+            "s3_uri": s3_uri,
             "completed_at": datetime.utcnow().isoformat() + "Z",
         })
 

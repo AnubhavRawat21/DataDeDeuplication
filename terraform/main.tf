@@ -16,6 +16,10 @@ provider "aws" {
   }
 }
 
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+
 # ── 1. Fetch Latest Ubuntu 22.04 LTS AMI ──
 data "aws_ami" "ubuntu" {
   most_recent = true

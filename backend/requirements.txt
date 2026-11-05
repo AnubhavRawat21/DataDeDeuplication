@@ -7,3 +7,4 @@ rapidfuzz
 joblib
 python-multipart
 websockets
+boto3
