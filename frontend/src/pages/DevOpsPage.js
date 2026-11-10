@@ -121,6 +121,49 @@ export default function DevOpsPage() {
         </div>
       </div>
 
+      {/* ── Observability & Monitoring Links ── */}
+      <div className="card animate-in animate-in-3" style={{marginTop:16}}>
+        <div className="card-title">Observability & Monitoring Stack</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))',gap:12,marginTop:12}}>
+          <a href={`http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3000`} target="_blank" rel="noreferrer" style={{textDecoration:'none'}}>
+            <div className="container-card" style={{cursor:'pointer',transition:'border-color 0.2s',borderColor:'rgba(255,255,255,0.1)'}}>
+              <div className="cc-header">
+                <span className="cc-name" style={{display:'flex',alignItems:'center',gap:6}}>📊 Grafana</span>
+                <span className="badge badge-emerald">Port 3000</span>
+              </div>
+              <div style={{fontSize:12,color:'var(--text-m)',marginTop:6}}>Live dashboards & metrics visualizer (admin/admin)</div>
+            </div>
+          </a>
+          <a href={`http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:9090`} target="_blank" rel="noreferrer" style={{textDecoration:'none'}}>
+            <div className="container-card" style={{cursor:'pointer',transition:'border-color 0.2s',borderColor:'rgba(255,255,255,0.1)'}}>
+              <div className="cc-header">
+                <span className="cc-name" style={{display:'flex',alignItems:'center',gap:6}}>🔥 Prometheus</span>
+                <span className="badge badge-emerald">Port 9090</span>
+              </div>
+              <div style={{fontSize:12,color:'var(--text-m)',marginTop:6}}>Scraping targets, TSDB & PromQL query engine</div>
+            </div>
+          </a>
+          <a href={`http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:9093`} target="_blank" rel="noreferrer" style={{textDecoration:'none'}}>
+            <div className="container-card" style={{cursor:'pointer',transition:'border-color 0.2s',borderColor:'rgba(255,255,255,0.1)'}}>
+              <div className="cc-header">
+                <span className="cc-name" style={{display:'flex',alignItems:'center',gap:6}}>🔔 Alertmanager</span>
+                <span className="badge badge-emerald">Port 9093</span>
+              </div>
+              <div style={{fontSize:12,color:'var(--text-m)',marginTop:6}}>Alert rules, notification routing & silences</div>
+            </div>
+          </a>
+          <a href={`http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:8000/docs`} target="_blank" rel="noreferrer" style={{textDecoration:'none'}}>
+            <div className="container-card" style={{cursor:'pointer',transition:'border-color 0.2s',borderColor:'rgba(255,255,255,0.1)'}}>
+              <div className="cc-header">
+                <span className="cc-name" style={{display:'flex',alignItems:'center',gap:6}}>⚡ FastAPI Docs</span>
+                <span className="badge badge-emerald">Port 8000</span>
+              </div>
+              <div style={{fontSize:12,color:'var(--text-m)',marginTop:6}}>Interactive Swagger UI & API documentation</div>
+            </div>
+          </a>
+        </div>
+      </div>
+
       {/* ── Deployments ── */}
       <div className="card animate-in animate-in-4" style={{marginTop:16}}>
         <div className="card-title">Recent Deployments</div>

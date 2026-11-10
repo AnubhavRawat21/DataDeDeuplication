@@ -466,8 +466,12 @@ def devops_status():
         },
         "docker": {
             "containers": [
+                {"name": "cloudsieve-frontend", "status": "running", "image": f"cloudsieve-frontend:{APP_VERSION}", "port": 80, "uptime": f"{int((time.time()-APP_START_TIME)//60)}m"},
                 {"name": "cloudsieve-backend", "status": "running", "image": f"cloudsieve-backend:{APP_VERSION}", "port": 8000, "uptime": f"{int((time.time()-APP_START_TIME)//60)}m"},
-                {"name": "cloudsieve-frontend", "status": "running", "image": f"cloudsieve-frontend:{APP_VERSION}", "port": 3000, "uptime": f"{int((time.time()-APP_START_TIME)//60)}m"},
+                {"name": "cloudsieve-grafana", "status": "running", "image": "grafana/grafana:10.4.0", "port": 3000, "uptime": f"{int((time.time()-APP_START_TIME)//60)}m"},
+                {"name": "cloudsieve-prometheus", "status": "running", "image": "prom/prometheus:v2.51.0", "port": 9090, "uptime": f"{int((time.time()-APP_START_TIME)//60)}m"},
+                {"name": "cloudsieve-alertmanager", "status": "running", "image": "prom/alertmanager:v0.27.0", "port": 9093, "uptime": f"{int((time.time()-APP_START_TIME)//60)}m"},
+                {"name": "cloudsieve-node-exporter", "status": "running", "image": "prom/node-exporter:v1.7.0", "port": 9100, "uptime": f"{int((time.time()-APP_START_TIME)//60)}m"},
             ]
         },
         "deployments": [
@@ -481,21 +485,30 @@ def infrastructure_status():
     return {
         "terraform": {
             "version": "1.7.0",
-            "provider": "kreuzwerker/docker",
+            "provider": "hashicorp/aws & kreuzwerker/docker",
             "state": "applied",
             "resources": [
-                {"type": "docker_network", "name": "cloudsieve-network", "status": "active"},
+                {"type": "docker_network", "name": "cloudsieve-net", "status": "active"},
+                {"type": "docker_container", "name": "cloudsieve-frontend", "status": "running", "port": "80"},
                 {"type": "docker_container", "name": "cloudsieve-backend", "status": "running", "port": "8000"},
-                {"type": "docker_container", "name": "cloudsieve-frontend", "status": "running", "port": "3000"},
-                {"type": "docker_volume", "name": "cloudsieve-uploads", "status": "mounted"},
-                {"type": "docker_volume", "name": "cloudsieve-outputs", "status": "mounted"},
+                {"type": "docker_container", "name": "cloudsieve-grafana", "status": "running", "port": "3000"},
+                {"type": "docker_container", "name": "cloudsieve-prometheus", "status": "running", "port": "9090"},
+                {"type": "docker_container", "name": "cloudsieve-alertmanager", "status": "running", "port": "9093"},
+                {"type": "docker_container", "name": "cloudsieve-node-exporter", "status": "running", "port": "9100"},
+                {"type": "docker_volume", "name": "uploads_data", "status": "mounted"},
+                {"type": "docker_volume", "name": "outputs_data", "status": "mounted"},
+                {"type": "docker_volume", "name": "prometheus_data", "status": "mounted"},
+                {"type": "docker_volume", "name": "grafana_data", "status": "mounted"},
+                {"type": "docker_volume", "name": "alertmanager_data", "status": "mounted"},
             ],
         },
         "services": [
-            {"name": "Docker", "status": "active", "type": "containerization"},
-            {"name": "Terraform", "status": "applied", "type": "iac"},
+            {"name": "Docker Engine", "status": "active", "type": "containerization"},
             {"name": "GitHub Actions", "status": "passing", "type": "cicd"},
-            {"name": "Render.com", "status": "deployed", "type": "hosting"},
+            {"name": "Amazon EC2", "status": "deployed", "type": "cloud_host"},
+            {"name": "Prometheus", "status": "scraping", "type": "monitoring"},
+            {"name": "Grafana", "status": "active", "type": "visualization"},
+            {"name": "Alertmanager", "status": "active", "type": "alerting"},
         ],
     }
 
