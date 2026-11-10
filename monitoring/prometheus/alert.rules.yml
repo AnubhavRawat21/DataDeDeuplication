@@ -1,0 +1,56 @@
+groups:
+  - name: cloudsieve_alerts
+    rules:
+      - alert: CloudSieveBackendDown
+        expr: up{job="backend"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "CloudSieve Backend is down"
+          description: "CloudSieve FastAPI backend container (port 8000) has been unreachable for more than 30 seconds."
+
+      - alert: HighHttpErrorRate
+        expr: sum(rate(http_requests_total{status=~"5.."}[2m])) / (sum(rate(http_requests_total[2m])) + 0.001) * 100 > 10
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated 5xx HTTP error rate"
+          description: "Over 10% of HTTP requests returned 5xx errors over the last 2 minutes."
+
+      - alert: HighRequestLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[2m])) by (le)) > 2
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API request latency"
+          description: "95th percentile HTTP request latency exceeds 2 seconds for 1 minute."
+
+      - alert: HostHighCpuLoad
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100) > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "EC2 Host CPU usage > 85%"
+          description: "EC2 CPU usage has been above 85% for more than 2 minutes."
+
+      - alert: HostHighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "EC2 Host RAM usage > 85%"
+          description: "EC2 memory consumption has exceeded 85% for more than 2 minutes."
+
+      - alert: HostDiskLowSpace
+        expr: (node_filesystem_size_bytes{mountpoint="/"} - node_filesystem_free_bytes{mountpoint="/"}) / node_filesystem_size_bytes{mountpoint="/"} * 100 > 85
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk space running out (> 85% full)"
+          description: "The root filesystem usage on the EC2 host has exceeded 85%."

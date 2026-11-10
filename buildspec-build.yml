@@ -1,0 +1,53 @@
+version: 0.2
+# buildspec-build.yml
+# AWS CodeBuild: Build Docker images + Push to Amazon ECR
+# Runs entirely on AWS — no local Docker or CLI required.
+
+phases:
+  pre_build:
+    commands:
+      - echo "=== Logging into Amazon ECR ==="
+      - ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-8)
+      - IMAGE_TAG=${COMMIT_HASH:-latest}
+      - echo "Building images with tag $IMAGE_TAG"
+
+  build:
+    commands:
+      - echo "=== Building Backend Docker Image ==="
+      - docker build
+          -f docker/Dockerfile.backend
+          -t $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG
+          -t $ECR_REGISTRY/$ECR_BACKEND_REPO:latest
+          ./backend
+
+      - echo "=== Building Frontend Docker Image ==="
+      - docker build
+          -f docker/Dockerfile.frontend
+          -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG
+          -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest
+          ./frontend
+
+  post_build:
+    commands:
+      - echo "=== Pushing Backend to ECR ==="
+      - docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG
+      - docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:latest
+
+      - echo "=== Pushing Frontend to ECR ==="
+      - docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG
+      - docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest
+
+      - echo "=== Build & Push Complete ==="
+      - echo "Backend  → $ECR_REGISTRY/$ECR_BACKEND_REPO:latest"
+      - echo "Frontend → $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest"
+
+      # Security scan on built images using Trivy (runs on AWS)
+      - echo "=== Running Trivy Security Scan ==="
+      - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+      - trivy image --exit-code 0 --severity HIGH,CRITICAL --ignore-unfixed $ECR_REGISTRY/$ECR_BACKEND_REPO:latest  || true
+      - trivy image --exit-code 0 --severity HIGH,CRITICAL --ignore-unfixed $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest || true
+
+      - echo "=== All Done ==="
+

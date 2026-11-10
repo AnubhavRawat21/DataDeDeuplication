@@ -3,7 +3,22 @@
 
 import axios from 'axios';
 
-const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001';
+const getBaseUrl = () => {
+  if (process.env.REACT_APP_API_URL) {
+    return process.env.REACT_APP_API_URL;
+  }
+  if (typeof window !== 'undefined') {
+    // Local development fallback when React runs on port 3000
+    if (window.location.hostname === 'localhost' && window.location.port === '3000') {
+      return 'http://localhost:8001';
+    }
+    // Production / Docker / AWS: same origin handled by Nginx reverse proxy
+    return window.location.origin;
+  }
+  return 'http://localhost:8001';
+};
+
+const BASE_URL = getBaseUrl();
 
 const API = axios.create({ baseURL: BASE_URL });
 
@@ -35,9 +50,15 @@ export const getEndpoints = () => API.get('/api/endpoints');
 
 // WebSocket connection for real-time pipeline progress
 export const createPipelineWS = (jobId, onMessage, onClose) => {
-  const wsProtocol = BASE_URL.startsWith('https') ? 'wss://' : 'ws://';
-  const wsDomain = BASE_URL.replace(/^https?:\/\//, '');
-  const wsUrl = `${wsProtocol}${wsDomain}/ws/pipeline/${jobId}`;
+  let wsUrl;
+  if (typeof window !== 'undefined' && (!process.env.REACT_APP_API_URL || BASE_URL === window.location.origin)) {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    wsUrl = `${wsProtocol}${window.location.host}/ws/pipeline/${jobId}`;
+  } else {
+    const wsProtocol = BASE_URL.startsWith('https') ? 'wss://' : 'ws://';
+    const wsDomain = BASE_URL.replace(/^https?:\/\//, '');
+    wsUrl = `${wsProtocol}${wsDomain}/ws/pipeline/${jobId}`;
+  }
   
   const ws = new WebSocket(wsUrl);
   ws.onmessage = (event) => {

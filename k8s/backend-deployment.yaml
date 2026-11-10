@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudsieve-backend
+  namespace: cloudsieve
+  labels:
+    app.kubernetes.io/name: cloudsieve-backend
+    app.kubernetes.io/part-of: cloudsieve
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: cloudsieve-backend
+  template:
+    metadata:
+      labels:
+        app: cloudsieve-backend
+    spec:
+      containers:
+        - name: backend
+          image: 345794120758.dkr.ecr.ap-southeast-2.amazonaws.com/cloudsieve-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: ENVIRONMENT
+              value: "production"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: S3_RESULTS_BUCKET
+              value: "cloudsieve-pro-results-345794120758"
+            - name: AWS_REGION
+              value: "ap-southeast-2"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          volumeMounts:
+            - name: uploads-storage
+              mountPath: /app/uploads
+            - name: outputs-storage
+              mountPath: /app/outputs
+      volumes:
+        - name: uploads-storage
+          emptyDir:
+            sizeLimit: 5Gi
+        - name: outputs-storage
+          emptyDir:
+            sizeLimit: 5Gi
+

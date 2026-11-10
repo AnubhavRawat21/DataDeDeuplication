@@ -1,9 +1,29 @@
-# Copy this file to terraform.tfvars and edit as needed
+# ──────────────────────────────────────────────────────────────
+# CloudSieve Pro — terraform.tfvars.example
+# Copy this file to `terraform.tfvars` to customize settings
+# ──────────────────────────────────────────────────────────────
 
-docker_host   = "npipe:////.//pipe//docker_engine"   # Windows
-# docker_host = "unix:///var/run/docker.sock"        # Linux/Mac
+aws_region        = "ap-southeast-2"
+environment       = "production"
+project_name      = "cloudsieve-pro"
 
-app_version    = "2.0.0"
-backend_port   = 8000
-frontend_port  = 3000
-environment    = "production"
+# Compute & Storage
+instance_type     = "t3.large"
+root_volume_size  = 20
+
+# Repository for automated container bootstrap
+github_repo_url   = "https://github.com/am4352/cloudsieve-pro.git"
+github_branch     = "main"
+
+# Security & Access
+# For production security, restrict SSH to your IP (e.g., "203.0.113.50/32")
+allowed_ssh_cidr  = "0.0.0.0/0"
+
+# Optional: Provide an existing AWS EC2 Key Pair in Sydney if you have one.
+# If left empty (""), Terraform automatically generates a 4096-bit RSA key
+# and saves it locally as `cloudsieve-key.pem`.
+existing_key_name = ""
+
+# Optional Kubernetes & ECR flags (set to true once IAM permissions are granted)
+enable_ecr        = false
+enable_eks        = false

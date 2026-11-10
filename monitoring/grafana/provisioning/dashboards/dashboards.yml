@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 'CloudSieve Dashboards'
+    orgId: 1
+    folder: 'CloudSieve Pro'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/dashboards

@@ -1,0 +1,55 @@
+version: 0.2
+# buildspec-deploy.yml
+# AWS CodeBuild: Deploy Kubernetes manifests to Amazon EKS
+# Runs entirely on AWS — no local kubectl required.
+
+phases:
+  install:
+    commands:
+      - echo "=== Installing kubectl ==="
+      - curl -LO "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl"
+      - chmod +x kubectl
+      - mv kubectl /usr/local/bin/kubectl
+      - kubectl version --client
+
+  pre_build:
+    commands:
+      - echo "=== Configuring kubectl for EKS ==="
+      - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
+      - kubectl get nodes
+
+  build:
+    commands:
+      - echo "=== Deploying Kubernetes Manifests ==="
+
+      # Namespace first
+      - kubectl apply -f k8s/namespace.yaml
+
+      # Storage
+      - kubectl apply -f k8s/storage.yaml
+
+      # Services (before deployments so DNS resolves)
+      - kubectl apply -f k8s/backend-service.yaml
+      - kubectl apply -f k8s/frontend-service.yaml
+
+      # Deployments
+      - kubectl apply -f k8s/backend-deployment.yaml
+      - kubectl apply -f k8s/frontend-deployment.yaml
+
+      # Ingress (ALB)
+      - kubectl apply -f k8s/ingress.yaml
+
+  post_build:
+    commands:
+      - echo "=== Verifying Rollout ==="
+      - kubectl rollout status deployment/cloudsieve-backend  -n cloudsieve --timeout=300s
+      - kubectl rollout status deployment/cloudsieve-frontend -n cloudsieve --timeout=300s
+
+      - echo "=== Cluster Status ==="
+      - kubectl get pods      -n cloudsieve
+      - kubectl get services  -n cloudsieve
+      - kubectl get ingress   -n cloudsieve
+
+      - echo "=== ALB DNS Name ==="
+      - kubectl get ingress cloudsieve-ingress -n cloudsieve -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+

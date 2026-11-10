@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudsieve-frontend
+  namespace: cloudsieve
+  labels:
+    app.kubernetes.io/name: cloudsieve-frontend
+    app.kubernetes.io/part-of: cloudsieve
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: cloudsieve-frontend
+  template:
+    metadata:
+      labels:
+        app: cloudsieve-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: 345794120758.dkr.ecr.ap-southeast-2.amazonaws.com/cloudsieve-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 2
+

@@ -2,7 +2,7 @@
 # CloudSieve Pro — FastAPI Backend v2.0
 # Enhanced with WebSocket, health monitoring, metrics, and versioning
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 import pandas as pd
@@ -22,6 +22,22 @@ from datetime import datetime
 from engine import run_full_pipeline
 
 # ─────────────────────────────────────────────
+# PROMETHEUS METRICS SETUP
+# ─────────────────────────────────────────────
+try:
+    from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+    PROMETHEUS_AVAILABLE = True
+    HTTP_REQUESTS_TOTAL = Counter("http_requests_total", "Total HTTP requests", ["method", "endpoint", "status"])
+    HTTP_REQUEST_DURATION_SECONDS = Histogram("http_request_duration_seconds", "HTTP request duration in seconds", ["endpoint"])
+    PIPELINE_RUNS_TOTAL = Counter("cloudsieve_pipeline_runs_total", "Total pipeline executions", ["status"])
+    PIPELINE_DURATION_SECONDS = Histogram("cloudsieve_pipeline_duration_seconds", "Pipeline duration in seconds")
+    LATEST_CQI_SCORE = Gauge("cloudsieve_latest_cqi_score", "Latest calculated Cloud Quality Index score")
+    ACTIVE_JOBS = Gauge("cloudsieve_active_jobs", "Currently running pipeline jobs")
+except ImportError:
+    PROMETHEUS_AVAILABLE = False
+    CONTENT_TYPE_LATEST = "text/plain"
+
+# ─────────────────────────────────────────────
 # APP INIT
 # ─────────────────────────────────────────────
 APP_START_TIME = time.time()
@@ -32,6 +48,25 @@ app = FastAPI(
     version=APP_VERSION,
     description="Enterprise Data Quality Engine with CI/CD Pipeline"
 )
+
+@app.middleware("http")
+async def prometheus_metrics_middleware(request, call_next):
+    if not PROMETHEUS_AVAILABLE:
+        return await call_next(request)
+    start_time = time.time()
+    endpoint = request.url.path
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    except Exception:
+        status_code = 500
+        raise
+    finally:
+        duration = time.time() - start_time
+        HTTP_REQUESTS_TOTAL.labels(method=request.method, endpoint=endpoint, status=str(status_code)).inc()
+        HTTP_REQUEST_DURATION_SECONDS.labels(endpoint=endpoint).observe(duration)
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,6 +80,23 @@ UPLOAD_DIR = Path("uploads")
 OUTPUT_DIR = Path("outputs")
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+# S3 Results Storage Bucket
+S3_RESULTS_BUCKET = os.environ.get("S3_RESULTS_BUCKET", "cloudsieve-pro-results-345794120758")
+AWS_REGION = os.environ.get("AWS_REGION", "ap-southeast-2")
+
+def upload_result_to_s3(local_file_path: Path, s3_key: str):
+    """Save processed CSV outputs and artifacts to Amazon S3."""
+    try:
+        import boto3
+        s3_client = boto3.client("s3", region_name=AWS_REGION)
+        s3_client.upload_file(str(local_file_path), S3_RESULTS_BUCKET, s3_key)
+        print(f"[S3] Uploaded {local_file_path.name} to s3://{S3_RESULTS_BUCKET}/{s3_key}")
+        return f"s3://{S3_RESULTS_BUCKET}/{s3_key}"
+    except Exception as err:
+        print(f"[S3 Warning] Could not upload {local_file_path.name} to S3: {err}")
+        return None
+
 
 # ─────────────────────────────────────────────
 # STATE: Pipeline progress & results
@@ -122,6 +174,8 @@ def run_pipeline_in_thread(job_id, file_path, fuzzy_col, threshold):
         "start_time": time.time(),
         "stage_times": [],
     }
+    if PROMETHEUS_AVAILABLE:
+        ACTIVE_JOBS.inc()
 
     try:
         result = run_full_pipeline(file_path, fuzzy_col, threshold)
@@ -131,6 +185,9 @@ def run_pipeline_in_thread(job_id, file_path, fuzzy_col, threshold):
         clean_path = OUTPUT_DIR / f"{job_id}_clean.csv"
         result["full_df"].to_csv(clean_path, index=False)
         
+        # Upload clean result to S3
+        s3_uri = upload_result_to_s3(clean_path, f"results/{job_id}/{job_id}_clean.csv")
+
         # Remove the dataframe from the result dict before storing in memory/history
         # because it cannot be JSON serialized
         del result["full_df"]
@@ -144,25 +201,39 @@ def run_pipeline_in_thread(job_id, file_path, fuzzy_col, threshold):
             "result": result,
             "elapsed": elapsed,
             "output_checksum": output_hash,
+            "s3_uri": s3_uri,
             "completed_at": datetime.utcnow().isoformat() + "Z",
         })
 
         # Update job metadata
+        cqi_val = result.get("cqi", {}).get("cqi_score", 0)
         if job_id in job_metadata:
             job_metadata[job_id]["status"] = "complete"
             job_metadata[job_id]["elapsed"] = elapsed
             job_metadata[job_id]["clean_records"] = result.get("clean_count", 0)
-            job_metadata[job_id]["cqi_score"] = result.get("cqi", {}).get("cqi_score", 0)
+            job_metadata[job_id]["cqi_score"] = cqi_val
             job_metadata[job_id]["output_checksum"] = output_hash
 
+        if PROMETHEUS_AVAILABLE:
+            PIPELINE_RUNS_TOTAL.labels(status="success").inc()
+            PIPELINE_DURATION_SECONDS.observe(elapsed)
+            if cqi_val:
+                LATEST_CQI_SCORE.set(cqi_val)
+
     except Exception as e:
+        elapsed = round(time.time() - pipeline_state[job_id]["start_time"], 2)
         pipeline_state[job_id].update({
             "status": "error",
             "error": str(e),
-            "elapsed": round(time.time() - pipeline_state[job_id]["start_time"], 2),
+            "elapsed": elapsed,
         })
         if job_id in job_metadata:
             job_metadata[job_id]["status"] = "error"
+        if PROMETHEUS_AVAILABLE:
+            PIPELINE_RUNS_TOTAL.labels(status="error").inc()
+    finally:
+        if PROMETHEUS_AVAILABLE:
+            ACTIVE_JOBS.dec()
 
 
 # ─────────────────────────────────────────────
@@ -429,11 +500,19 @@ def infrastructure_status():
     }
 
 
+@app.get("/metrics")
+def get_metrics():
+    if not PROMETHEUS_AVAILABLE:
+        return JSONResponse({"status": "unavailable", "message": "prometheus_client not installed"}, status_code=501)
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 @app.get("/api/endpoints")
 def list_endpoints():
     return [
         {"method": "GET", "path": "/", "description": "Service info"},
         {"method": "GET", "path": "/health", "description": "Health check with system metrics"},
+        {"method": "GET", "path": "/metrics", "description": "Prometheus metrics telemetry"},
         {"method": "GET", "path": "/sample", "description": "Download sample dirty CSV"},
         {"method": "POST", "path": "/upload", "description": "Upload CSV file, returns job_id"},
         {"method": "POST", "path": "/run/{job_id}", "description": "Start pipeline execution"},

@@ -1,0 +1,115 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cloudsieve-ingress
+  namespace: cloudsieve
+  labels:
+    app.kubernetes.io/name: cloudsieve-ingress
+    app.kubernetes.io/part-of: cloudsieve
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/load-balancer-name: cloudsieve-alb
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/success-codes: "200,301,302"
+    alb.ingress.kubernetes.io/proxy-body-size: "100m"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+spec:
+  rules:
+    - http:
+        paths:
+          # Backend API & WebSocket Routes
+          - path: /upload
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudsieve-backend-svc
+                port:
+                  number: 8000
+          - path: /run
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudsieve-backend-svc
+                port:
+                  number: 8000
+          - path: /job
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudsieve-backend-svc
+                port:
+                  number: 8000
+          - path: /download
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudsieve-backend-svc
+                port:
+                  number: 8000
+          - path: /sample
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudsieve-backend-svc
+                port:
+                  number: 8000
+          - path: /history
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudsieve-backend-svc
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: cloudsieve-backend-svc
+                port:
+                  number: 8000
+          - path: /devops
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudsieve-backend-svc
+                port:
+                  number: 8000
+          - path: /infrastructure
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudsieve-backend-svc
+                port:
+                  number: 8000
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudsieve-backend-svc
+                port:
+                  number: 8000
+          - path: /openapi.json
+            pathType: Exact
+            backend:
+              service:
+                name: cloudsieve-backend-svc
+                port:
+                  number: 8000
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudsieve-backend-svc
+                port:
+                  number: 8000
+          # Frontend Root Catch-All
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudsieve-frontend-svc
+                port:
+                  number: 80
+

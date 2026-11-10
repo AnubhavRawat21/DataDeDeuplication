@@ -24,6 +24,7 @@ services:
       dockerfile: ../docker/Dockerfile.frontend
     container_name: cloudsieve-frontend
     ports:
+      - "80:80"
       - "3000:80"
     depends_on:
       - backend
@@ -31,10 +32,89 @@ services:
     networks:
       - cloudsieve-net
 
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: cloudsieve-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    networks:
+      - cloudsieve-net
+    depends_on:
+      - backend
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: cloudsieve-alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ../monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    networks:
+      - cloudsieve-net
+
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: cloudsieve-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+    networks:
+      - cloudsieve-net
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: cloudsieve-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ../monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ../monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - cloudsieve-net
+    depends_on:
+      - prometheus
+
 volumes:
   uploads_data:
     driver: local
   outputs_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+  grafana_data:
     driver: local
 
 networks:

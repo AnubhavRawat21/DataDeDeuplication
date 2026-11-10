@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cloudsieve-data-pvc
+  namespace: cloudsieve
+  labels:
+    app.kubernetes.io/name: cloudsieve-pro
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+
