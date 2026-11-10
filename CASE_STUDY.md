@@ -22,31 +22,33 @@ A cloud-native, automated **Data Quality Engine** that profiles, deduplicates, r
 ```
 Developer (git push)
         ↓
-GitHub (Source Control — Public Repo)
+GitHub (Source Control — Repository)
         ↓
 GitHub Actions CI/CD Pipeline
-  ├─ 🔍 Stage 1: Lint      (flake8 Python + Node build)
-  ├─ 🧪 Stage 2: Test      (pytest — 15 automated test cases)
-  ├─ 🐳 Stage 3: Docker    (build backend + frontend images)
-  └─ 🚀 Stage 4: Deploy    (auto-trigger Render.com webhook)
+  ├─ 🔍 Stage 1: Lint          (flake8 Python + Node build)
+  ├─ 🧪 Stage 2: Test          (pytest — 15 automated test cases)
+  ├─ 🐳 Stage 3: Docker Build  (build backend + frontend containers)
+  └─ 🚀 Stage 4: Deploy        (automated SSH deployment to AWS EC2)
         ↓
-Render.com Cloud Platform
-  ├─ cloudsieve-backend  →  FastAPI (Python 3.11) Web Service
-  └─ cloudsieve-frontend →  React Static Site on Global CDN
-        ↑
-Terraform (Infrastructure as Code)
-  └─ Defines containers, networks, volumes in main.tf
+Amazon Web Services (AWS EC2 Instance: 13.201.99.77)
+  ├── cloudsieve-frontend       →  React SPA (Nginx Reverse Proxy on Port 80)
+  ├── cloudsieve-backend        →  FastAPI (Python 3.11) Web Service on Port 8000
+  ├── cloudsieve-prometheus     →  Prometheus Time-Series Scraper on Port 9090
+  ├── cloudsieve-grafana        →  Grafana Observability Dashboard on Port 3000
+  ├── cloudsieve-alertmanager   →  Alertmanager Notification System on Port 9093
+  └── cloudsieve-node-exporter  →  Host Telemetry Exporter on Port 9100
 ```
 
 ### IaaS / PaaS / SaaS Classification
 | Service | Type | Role in CloudSieve |
 |---|---|---|
-| **Docker** | IaaS | Containerizes backend & frontend for reproducible deployments |
-| **Terraform** | IaaS | Provisions containers, networks, volumes as code |
+| **Amazon EC2** | IaaS | Cloud compute instance hosting containers and data storage |
+| **Docker & Compose**| IaaS | Containerizes microservices for isolated, reproducible deployments |
 | **GitHub Actions** | PaaS | Runs the automated 4-stage CI/CD pipeline |
-| **Render.com** | PaaS | Hosts the live cloud application with zero-downtime deploys |
-| **FastAPI API** | SaaS | The data quality engine service consumed by the frontend |
-| **React UI** | SaaS | Complete end-user SaaS product for data cleaning |
+| **Prometheus & Grafana** | PaaS | Observability platform, metrics collection, and live dashboards |
+| **Alertmanager** | PaaS | Evaluates alerting rules and routes notification alerts |
+| **FastAPI Engine** | SaaS API | The core data quality and deduplication engine |
+| **React UI** | SaaS UI | Modern client interface for dataset upload, cleaning, and analytics |
 
 ---
 
@@ -69,41 +71,41 @@ CQI = (Completeness + Uniqueness + Validity + Consistency + Accuracy) / 5 × 100
 ```
 
 ### CI/CD Pipeline (`.github/workflows/ci-cd.yml`)
-Triggered automatically on every `git push to main`:
-1. **Lint** — `flake8` checks Python code quality
-2. **Test** — `pytest` runs 15 test cases covering all 6 pipeline stages
-3. **Docker Build** — Builds `cloudsieve-backend` and `cloudsieve-frontend` images
-4. **Deploy** — Calls Render.com webhook to trigger zero-downtime redeploy
+Triggered automatically on every `git push to main` or `workflow_dispatch`:
+1. **Lint** — `flake8` checks Python code quality + React production build test
+2. **Test** — `pytest` runs 15 automated test cases covering all 6 pipeline stages and outputs JUnit XML
+3. **Docker Build** — Verifies container builds for backend and frontend using Docker Buildx
+4. **Deploy** — Automated SSH deployment to AWS EC2 instance (`13.201.99.77`) with container restart and health verification
+
+### Observability & Alerting Stack
+- **Prometheus** (`:9090` or `/prometheus/`): Scrapes metrics every 15s from FastAPI `/metrics`, Node Exporter, and Alertmanager.
+- **Alertmanager** (`:9093` or `/alertmanager/`): Dispatches alerts with deduplication, grouping, and quiet periods.
+  - Alert rules configured for `CloudSieveBackendDown`, `HighHttpErrorRate`, `HighRequestLatency`, `HostHighCpuLoad`, and `HostHighMemoryUsage`.
+- **Grafana** (`:3000` or `/grafana/`): Visualizes live CQI metrics, active jobs, request throughput, and system resource saturation.
+- **Node Exporter** (`:9100`): Collects Linux kernel and OS telemetry (CPU, RAM, disk, network).
 
 ### Docker Configuration
-- **`Dockerfile.backend`** — Python 3.11 Alpine → installs `requirements.txt` → runs uvicorn
-- **`Dockerfile.frontend`** — Node 18 Alpine (builds React) → Nginx Alpine (serves production bundle)
-- Nginx handles all SPA routing with `try_files` rewrite rules
-
-### Terraform (`terraform/main.tf`)
-Provisions complete Docker infrastructure as code:
-- `docker_network` — Isolated bridge network for inter-container communication
-- `docker_container` (backend) — FastAPI on port 8001 with volume mounts
-- `docker_container` (frontend) — Nginx on port 3000
-- `docker_volume` (uploads, outputs) — Persistent storage across container restarts
+- **`Dockerfile.backend`** — Python 3.11 Slim → installs requirements (`prometheus-client`, `fastapi`, `scikit-learn`, `rapidfuzz`) → runs uvicorn on port 8000
+- **`Dockerfile.frontend`** — Node 18 Alpine (builds React) → Nginx Alpine (serves production bundle & reverse-proxies APIs, Prometheus, Alertmanager, and Grafana on port 80)
+- Nginx handles all SPA routing, API forwarding, WebSocket upgrades, and subpath proxies
 
 ### Backend API Endpoints (`main.py`)
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/health` | Health check — uptime, active jobs, storage stats |
+| GET | `/metrics` | Prometheus telemetry exposition format |
 | POST | `/upload` | Upload CSV → returns `job_id` + preview |
 | POST | `/run/{job_id}` | Start pipeline in background thread |
 | GET | `/job/{job_id}/status` | Poll pipeline progress |
 | WS | `/ws/pipeline/{job_id}` | WebSocket real-time stage updates |
 | GET | `/download/{job_id}` | Download cleaned CSV |
-| GET | `/devops/status` | CI/CD pipeline status for DevOps page |
-| GET | `/infrastructure/status` | Terraform resource status for Infra page |
+| GET | `/devops/status` | CI/CD pipeline and multi-container status |
+| GET | `/infrastructure/status` | Cloud & container infrastructure resource status |
 
 ### Security & Networking
-- CORS middleware on FastAPI with wildcard `*` (dev) / specific origin (prod)
-- Environment variable `REACT_APP_API_URL` isolates prod from localhost config
-- `wss://` (secure WebSocket) used automatically on HTTPS Render deployment
-- Render provides automatic free SSL certificates
+- Inbound traffic routed through Port 80 (Nginx reverse proxy), Port 8000 (API), Port 3000 (Grafana), Port 9090 (Prometheus), and Port 9093 (Alertmanager).
+- Private key authentication (`DataDeDuplication.pem`) secured with restricted ACLs.
+- GitHub Actions deploys securely via SSH using repository secrets (`EC2_SSH_KEY`, `EC2_HOST`, `EC2_USER`).
 
 ---
 
