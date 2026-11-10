@@ -9,3 +9,4 @@ python-multipart
 websockets
 boto3
 prometheus-client
+bandit

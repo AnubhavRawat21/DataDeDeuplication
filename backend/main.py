@@ -475,7 +475,7 @@ def devops_status():
             ]
         },
         "deployments": [
-            {"id": "dep-" + str(uuid.uuid4())[:6], "commit": hashlib.sha1(str(time.time()).encode()).hexdigest()[:7], "status": "live", "timestamp": datetime.utcnow().isoformat() + "Z", "environment": "production"},
+            {"id": "dep-" + str(uuid.uuid4())[:6], "commit": hashlib.sha1(str(time.time()).encode(), usedforsecurity=False).hexdigest()[:7], "status": "live", "timestamp": datetime.utcnow().isoformat() + "Z", "environment": "production"},
         ],
     }
 
