@@ -1,6 +1,6 @@
 # ☁️ CloudSieve Pro — Enterprise Data Quality Platform
 
-[![CI/CD Pipeline](https://github.com/aryadhotre/cloudsieve-pro/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/aryadhotre/cloudsieve-pro/actions)
+[![CI/CD Pipeline](https://github.com/am4352/cloudsieve-pro/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/am4352/cloudsieve-pro/actions)
 [![Live on Render](https://img.shields.io/badge/Render-Live%20Deployment-46E3B7?logo=render&logoColor=white)](https://dashboard.render.com)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://hub.docker.com)
 [![Terraform](https://img.shields.io/badge/Terraform-IaC%20Provisioned-844FBA?logo=terraform&logoColor=white)](https://registry.terraform.io)
